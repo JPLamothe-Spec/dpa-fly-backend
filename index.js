@@ -9,35 +9,37 @@ app.use(urlencoded.urlencoded({ extended: false }));
 
 const PORT = process.env.PORT || 3000;
 
-// ✅ Root path to pass Fly.io health check
+// ✅ Root health check route
 app.get("/", (req, res) => {
   res.status(200).send("Fly.io root OK");
 });
 
-// ✅ GET request for Twilio webhook verification
+// ✅ GET route for Twilio webhook testing
 app.get("/twilio/voice", (req, res) => {
   res.status(200).send("GET OK");
 });
 
-// ✅ POST request from Twilio to begin streaming
+// ✅ POST route triggered by Twilio when a call comes in
 app.post("/twilio/voice", (req, res) => {
   console.log("🎯 Twilio webhook hit");
 
-  const twiml = `
-    <Response>
-      <Start>
-        <Stream url="wss://dpa-fly-backend.fly.dev/media-stream" track="inbound_track" />
-      </Start>
-    </Response>
-  `;
-  res.type("text/xml");
-  res.send(twiml.trim());
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">Please hold while we connect you.</Say>
+  <Start>
+    <Stream url="wss://dpa-fly-backend.fly.dev/media-stream" track="inbound_track"/>
+  </Start>
+</Response>`;
+
+  res.set("Content-Type", "text/xml");
+  res.set("Content-Length", Buffer.byteLength(twiml, 'utf8'));
+  res.status(200).send(twiml);
 });
 
-// ✅ Start HTTP server
+// ✅ Create HTTP server
 const server = http.createServer(app);
 
-// ✅ WebSocket setup
+// ✅ WebSocket server for /media-stream endpoint
 const wss = new WebSocket.Server({ noServer: true });
 
 server.on("upgrade", (request, socket, head) => {
@@ -56,7 +58,7 @@ server.on("upgrade", (request, socket, head) => {
   }
 });
 
-// ✅ WebSocket connection handler
+// ✅ Handle WebSocket audio stream from Twilio
 wss.on("connection", (ws, request) => {
   console.log("🧩 WebSocket connection established");
 
@@ -73,7 +75,7 @@ wss.on("connection", (ws, request) => {
   });
 });
 
-// ✅ Start listening
+// ✅ Start the HTTP server
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
