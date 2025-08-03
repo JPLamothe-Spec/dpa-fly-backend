@@ -9,13 +9,14 @@ app.use(urlencoded.urlencoded({ extended: false }));
 
 const PORT = process.env.PORT || 3000;
 
+// ✅ Hardcoded Fly.io domain to ensure Twilio can stream to it
 app.post("/twilio/voice", (req, res) => {
   console.log("🎯 Twilio webhook hit");
 
   const twiml = `
     <Response>
       <Start>
-        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+        <Stream url="wss://dpa-fly-backend.fly.dev/media-stream" track="inbound_track" />
       </Start>
     </Response>
   `;
@@ -25,6 +26,7 @@ app.post("/twilio/voice", (req, res) => {
 
 const server = http.createServer(app);
 
+// ✅ WebSocket server (manual upgrade path)
 const wss = new WebSocket.Server({ noServer: true });
 
 server.on("upgrade", (request, socket, head) => {
@@ -43,6 +45,7 @@ server.on("upgrade", (request, socket, head) => {
   }
 });
 
+// ✅ WebSocket connection logic
 wss.on("connection", (ws, request) => {
   console.log("🧩 WebSocket connection established");
 
@@ -50,15 +53,5 @@ wss.on("connection", (ws, request) => {
     console.log("🎧 Received message from Twilio:", message.toString());
   });
 
-  ws.on("close", () => {
-    console.log("🔌 WebSocket connection closed");
-  });
+  ws.on("close", (
 
-  ws.on("error", (err) => {
-    console.error("❌ WebSocket error:", err);
-  });
-});
-
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
-});
