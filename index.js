@@ -20,22 +20,26 @@ app.post("/twilio/voice", (req, res) => {
 
   const twiml = `
     <Response>
+      <Say voice="alice">Please hold while we connect you.</Say>
       <Start>
         <Stream url="wss://dpa-fly-backend.fly.dev/media-stream" track="inbound_track" />
       </Start>
     </Response>
-  `;
-  res.type("text/xml");
-  res.send(twiml.trim());
+  `.trim();
+
+  res.set("Content-Type", "text/xml");
+  res.set("Content-Length", Buffer.byteLength(twiml, "utf8"));
+  res.status(200).send(twiml);
 });
 
+// ✅ Create HTTP server
 const server = http.createServer(app);
 
-// ✅ WebSocket server setup
+// ✅ WebSocket server (manual upgrade)
 const wss = new WebSocket.Server({ noServer: true });
 
 server.on("upgrade", (request, socket, head) => {
-  console.log("🛠 WebSocket upgrade attempt:", request.url);
+  console.log("🛠 WebSocket upgrade attempt to:", request.url);
 
   socket.on("error", (err) => {
     console.error("💥 WebSocket socket error:", err);
@@ -43,9 +47,11 @@ server.on("upgrade", (request, socket, head) => {
 
   if (request.url === "/media-stream") {
     wss.handleUpgrade(request, socket, head, (ws) => {
+      console.log("📡 WebSocket upgraded, awaiting audio...");
       wss.emit("connection", ws, request);
     });
   } else {
+    console.warn("⚠️ Unknown upgrade path:", request.url);
     socket.destroy();
   }
 });
