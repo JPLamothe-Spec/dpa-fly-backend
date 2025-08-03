@@ -9,37 +9,39 @@ app.use(urlencoded.urlencoded({ extended: false }));
 
 const PORT = process.env.PORT || 3000;
 
-// ✅ TEMP: Respond to GET requests so Twilio webhook can be verified
+// ✅ Root path to pass Fly.io health check
+app.get("/", (req, res) => {
+  res.status(200).send("Fly.io root OK");
+});
+
+// ✅ GET request for Twilio webhook verification
 app.get("/twilio/voice", (req, res) => {
   res.status(200).send("GET OK");
 });
 
-// ✅ Main Twilio POST webhook
+// ✅ POST request from Twilio to begin streaming
 app.post("/twilio/voice", (req, res) => {
   console.log("🎯 Twilio webhook hit");
 
   const twiml = `
     <Response>
-      <Say voice="alice">Please hold while we connect you.</Say>
       <Start>
         <Stream url="wss://dpa-fly-backend.fly.dev/media-stream" track="inbound_track" />
       </Start>
     </Response>
-  `.trim();
-
-  res.set("Content-Type", "text/xml");
-  res.set("Content-Length", Buffer.byteLength(twiml, "utf8"));
-  res.status(200).send(twiml);
+  `;
+  res.type("text/xml");
+  res.send(twiml.trim());
 });
 
-// ✅ Create HTTP server
+// ✅ Start HTTP server
 const server = http.createServer(app);
 
-// ✅ WebSocket server (manual upgrade)
+// ✅ WebSocket setup
 const wss = new WebSocket.Server({ noServer: true });
 
 server.on("upgrade", (request, socket, head) => {
-  console.log("🛠 WebSocket upgrade attempt to:", request.url);
+  console.log("🛠 WebSocket upgrade attempt:", request.url);
 
   socket.on("error", (err) => {
     console.error("💥 WebSocket socket error:", err);
@@ -47,15 +49,14 @@ server.on("upgrade", (request, socket, head) => {
 
   if (request.url === "/media-stream") {
     wss.handleUpgrade(request, socket, head, (ws) => {
-      console.log("📡 WebSocket upgraded, awaiting audio...");
       wss.emit("connection", ws, request);
     });
   } else {
-    console.warn("⚠️ Unknown upgrade path:", request.url);
     socket.destroy();
   }
 });
 
+// ✅ WebSocket connection handler
 wss.on("connection", (ws, request) => {
   console.log("🧩 WebSocket connection established");
 
@@ -72,6 +73,7 @@ wss.on("connection", (ws, request) => {
   });
 });
 
+// ✅ Start listening
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
