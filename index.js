@@ -2,7 +2,6 @@ const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const { GoogleAuth } = require("google-auth-library");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { Transform } = require("stream");
 require("dotenv").config();
 
