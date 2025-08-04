@@ -2,6 +2,7 @@ const WebSocket = require("ws");
 const express = require("express");
 const http = require("http");
 const bodyParser = require("body-parser");
+const { connectToOpenAI } = require("./openaiSocket");
 require("dotenv").config();
 
 const app = express();
@@ -9,17 +10,17 @@ app.use(bodyParser.urlencoded({ extended: false }));
 
 const PORT = process.env.PORT || 3000;
 
-// ✅ Health check route for Fly.io
+// ✅ Health check
 app.get("/", (req, res) => {
   res.status(200).send("Fly.io root OK");
 });
 
-// ✅ Twilio webhook verification via GET
+// ✅ Twilio webhook GET
 app.get("/twilio/voice", (req, res) => {
   res.status(200).send("GET OK");
 });
 
-// ✅ Main webhook POST from Twilio Voice
+// ✅ Twilio webhook POST
 app.post("/twilio/voice", (req, res) => {
   console.log("🎯 Twilio webhook hit");
 
@@ -39,10 +40,10 @@ app.post("/twilio/voice", (req, res) => {
   res.status(200).send(twiml.trim());
 });
 
-// ✅ Create HTTP server
+// ✅ HTTP server
 const server = http.createServer(app);
 
-// ✅ WebSocket upgrade handler
+// ✅ WebSocket server
 const wss = new WebSocket.Server({ noServer: true });
 
 server.on("upgrade", (request, socket, head) => {
@@ -53,7 +54,7 @@ server.on("upgrade", (request, socket, head) => {
   });
 
   if (request.url === "/media-stream") {
-    wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.handleUpgrade(request, socket, head, async (ws) => {
       wss.emit("connection", ws, request);
     });
   } else {
@@ -61,20 +62,37 @@ server.on("upgrade", (request, socket, head) => {
   }
 });
 
-// ✅ WebSocket message handler
-wss.on("connection", (ws, request) => {
-  console.log("🧩 WebSocket connection established");
+// ✅ Handle Twilio → OpenAI audio stream
+wss.on("connection", async (twilioWs, request) => {
+  console.log("🧩 WebSocket connection established with Twilio");
 
-  ws.on("message", (message) => {
-    console.log("🎧 Received message from Twilio:", message.toString());
+  const openai = await connectToOpenAI();
+
+  if (!openai) {
+    console.error("❌ Failed to connect to OpenAI");
+    twilioWs.close();
+    return;
+  }
+
+  twilioWs.on("message", (message) => {
+    try {
+      const payload = JSON.parse(message.toString());
+      if (payload.event === "media" && payload.media?.payload) {
+        openai.sendAudio(payload.media.payload); // 🔁 forward base64 audio
+      }
+    } catch (err) {
+      console.error("❌ Failed to process Twilio message:", err);
+    }
   });
 
-  ws.on("close", () => {
-    console.log("🔌 WebSocket connection closed");
+  twilioWs.on("close", () => {
+    console.log("🔌 Twilio WebSocket closed");
+    openai.close();
   });
 
-  ws.on("error", (err) => {
-    console.error("❌ WebSocket error:", err);
+  twilioWs.on("error", (err) => {
+    console.error("❌ Twilio WebSocket error:", err);
+    openai.close();
   });
 });
 
