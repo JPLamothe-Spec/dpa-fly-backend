@@ -1,3 +1,10 @@
+const WebSocket = require("ws");
+
+const ASSISTANT_ID = process.env.ASSISTANT_ID;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+const OPENAI_URL = `wss://api.openai.com/v1/assistants/${ASSISTANT_ID}/rt`;
+
 function connectToOpenAI() {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(OPENAI_URL, {
@@ -26,6 +33,7 @@ function connectToOpenAI() {
     ws.on("message", (data) => {
       try {
         const message = JSON.parse(data.toString());
+
         if (message.type === "transcript") {
           console.log(`📝 Transcript: ${message.transcript}`);
         } else if (message.type === "message_created") {
@@ -47,10 +55,12 @@ function connectToOpenAI() {
 
     ws.on("error", (err) => {
       console.error("❌ OpenAI WebSocket error:", err.message);
-      reject(err); // ✅ Don't just reject(null)
+      reject(err);
     });
   }).catch((err) => {
     console.error("🚨 Failed to connect to OpenAI:", err);
     return null;
   });
 }
+
+module.exports = { connectToOpenAI };
