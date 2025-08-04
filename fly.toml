@@ -15,3 +15,14 @@
   [services.tls_options]
     alpn = ["h2", "http/1.1"]
     versions = ["TLSv1.3", "TLSv1.2"]
+
+# ✅ Add this block at the bottom to lock deployments to Sydney
+[deploy]
+  release_command = ""
+  strategy = "immediate"
+
+[experimental]
+  auto_rollback = true
+
+[primary_region]
+  region = "syd"
