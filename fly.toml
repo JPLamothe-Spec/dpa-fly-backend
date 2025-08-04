@@ -1,10 +1,5 @@
-# fly.toml app configuration file generated for dpa-fly-backend-ufegxw on 2025-08-04T03:25:20Z
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'dpa-fly-backend-ufegxw'
-primary_region = 'syd'
+app = "dpa-fly-backend-ufegxw"
+primary_region = "syd"
 
 [build]
 
