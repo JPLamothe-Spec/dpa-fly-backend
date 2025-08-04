@@ -1,45 +1,47 @@
 const WebSocket = require("ws");
 const express = require("express");
 const http = require("http");
-const urlencoded = require("body-parser");
+const bodyParser = require("body-parser");
 require("dotenv").config();
 
 const app = express();
-app.use(urlencoded.urlencoded({ extended: false }));
+app.use(bodyParser.urlencoded({ extended: false }));
 
 const PORT = process.env.PORT || 3000;
 
-// ✅ Root health check route
+// ✅ Health check route for Fly.io
 app.get("/", (req, res) => {
   res.status(200).send("Fly.io root OK");
 });
 
-// ✅ GET route for Twilio webhook testing
+// ✅ Twilio webhook verification via GET
 app.get("/twilio/voice", (req, res) => {
   res.status(200).send("GET OK");
 });
 
-// ✅ POST route triggered by Twilio when a call comes in
+// ✅ Main webhook POST from Twilio Voice
 app.post("/twilio/voice", (req, res) => {
   console.log("🎯 Twilio webhook hit");
 
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">Please hold while we connect you.</Say>
-  <Start>
-    <Stream url="wss://dpa-fly-backend.fly.dev/media-stream" track="inbound_track"/>
-  </Start>
-</Response>`;
+  const twiml = `
+    <?xml version="1.0" encoding="UTF-8"?>
+    <Response>
+      <Say voice="alice">Please hold while we connect you.</Say>
+      <Start>
+        <Stream url="wss://dpa-fly-backend.fly.dev/media-stream" track="inbound_track"/>
+      </Start>
+    </Response>
+  `;
 
   res.set("Content-Type", "text/xml");
-  res.set("Content-Length", Buffer.byteLength(twiml, 'utf8'));
-  res.status(200).send(twiml);
+  res.set("Content-Length", Buffer.byteLength(twiml, "utf8"));
+  res.status(200).send(twiml.trim());
 });
 
 // ✅ Create HTTP server
 const server = http.createServer(app);
 
-// ✅ WebSocket server for /media-stream endpoint
+// ✅ WebSocket upgrade handler
 const wss = new WebSocket.Server({ noServer: true });
 
 server.on("upgrade", (request, socket, head) => {
@@ -58,7 +60,7 @@ server.on("upgrade", (request, socket, head) => {
   }
 });
 
-// ✅ Handle WebSocket audio stream from Twilio
+// ✅ WebSocket message handler
 wss.on("connection", (ws, request) => {
   console.log("🧩 WebSocket connection established");
 
@@ -75,7 +77,7 @@ wss.on("connection", (ws, request) => {
   });
 });
 
-// ✅ Start the HTTP server
+// ✅ Start server
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
