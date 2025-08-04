@@ -1,9 +1,20 @@
+app = "dpa-fly-backend"
+primary_region = "syd"
+
+[deploy]
+  release_command = ""
+  strategy = "immediate"
+
+[experimental]
+  auto_rollback = true
+
 [[services]]
   internal_port = 3000
   protocol = "tcp"
 
   [[services.ports]]
     port = 80
+
   [[services.ports]]
     port = 443
 
@@ -15,12 +26,3 @@
   [services.tls_options]
     alpn = ["h2", "http/1.1"]
     versions = ["TLSv1.3", "TLSv1.2"]
-
-[deploy]
-  release_command = ""
-  strategy = "immediate"
-
-[experimental]
-  auto_rollback = true
-
-primary_region = "syd"
