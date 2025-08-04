@@ -1,4 +1,4 @@
-app = "dpa-fly-backend"
+app = "app = "dpa-fly-backend-ufegxw"
 primary_region = "syd"
 
 [deploy]
