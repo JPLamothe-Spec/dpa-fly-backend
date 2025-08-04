@@ -1,8 +1,8 @@
-const WebSocket = require("ws");
 const express = require("express");
 const http = require("http");
+const WebSocket = require("ws");
 const bodyParser = require("body-parser");
-const { connectToOpenAI } = require("./openaiSocket");
+const { connectToGemini } = require("./geminivoicesocket");
 require("dotenv").config();
 
 const app = express();
@@ -28,9 +28,9 @@ app.post("/twilio/voice", (req, res) => {
     <?xml version="1.0" encoding="UTF-8"?>
     <Response>
       <Start>
-        <Stream url="wss://dpa-fly-backend-ufegxw.fly.dev/media-stream" track="inbound_track"/>
+        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
       </Start>
-      <Say voice="alice">Please hold while we connect you.</Say>
+      <Say voice="alice">Please hold while I connect you.</Say>
       <Pause length="30"/>
     </Response>
   `;
@@ -62,23 +62,31 @@ server.on("upgrade", (request, socket, head) => {
   }
 });
 
-// ✅ Handle Twilio → OpenAI audio stream
+// ✅ Handle Twilio → Gemini voice stream
 wss.on("connection", async (twilioWs, request) => {
-  console.log("🧩 WebSocket connection established with Twilio");
+  console.log("🔗 Twilio WebSocket connected");
 
-  const openai = await connectToOpenAI();
-
-  if (!openai) {
-    console.error("❌ Failed to connect to OpenAI");
-    twilioWs.close();
-    return;
-  }
+  const geminiWs = await connectToGemini((audioChunk) => {
+    if (twilioWs.readyState === WebSocket.OPEN) {
+      const message = {
+        event: "media",
+        media: {
+          payload: audioChunk.toString("base64"),
+        },
+      };
+      twilioWs.send(JSON.stringify(message));
+    }
+  });
 
   twilioWs.on("message", (message) => {
     try {
       const payload = JSON.parse(message.toString());
       if (payload.event === "media" && payload.media?.payload) {
-        openai.sendAudio(payload.media.payload); // 🔁 forward base64 audio
+        geminiWs.send(
+          JSON.stringify({
+            audio: payload.media.payload,
+          })
+        );
       }
     } catch (err) {
       console.error("❌ Failed to process Twilio message:", err);
@@ -87,12 +95,12 @@ wss.on("connection", async (twilioWs, request) => {
 
   twilioWs.on("close", () => {
     console.log("🔌 Twilio WebSocket closed");
-    openai.close();
+    geminiWs.close();
   });
 
   twilioWs.on("error", (err) => {
     console.error("❌ Twilio WebSocket error:", err);
-    openai.close();
+    geminiWs.close();
   });
 });
 
