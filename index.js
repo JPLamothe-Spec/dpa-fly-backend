@@ -26,10 +26,10 @@ app.post("/twilio/voice", (req, res) => {
   const twiml = `
     <?xml version="1.0" encoding="UTF-8"?>
     <Response>
-      <Say voice="alice">Please hold while we connect you.</Say>
       <Start>
         <Stream url="wss://dpa-fly-backend-ufegxw.fly.dev/media-stream" track="inbound_track"/>
       </Start>
+      <Say voice="alice">Please hold while we connect you.</Say>
     </Response>
   `;
 
