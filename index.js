@@ -30,6 +30,7 @@ app.post("/twilio/voice", (req, res) => {
         <Stream url="wss://dpa-fly-backend-ufegxw.fly.dev/media-stream" track="inbound_track"/>
       </Start>
       <Say voice="alice">Please hold while we connect you.</Say>
+      <Pause length="30"/>
     </Response>
   `;
 
