@@ -2,90 +2,64 @@
 
 const WebSocket = require("ws");
 const { GoogleAuth } = require("google-auth-library");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { PassThrough } = require("stream");
 
 const GEMINI_WS_URL =
-  "wss://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-native-audio:streamGenerateContent";
+  "wss://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-1:streamGenerateContent";
 
-async function startGeminiStream(onTranscriptCallback) {
-  const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+let geminiWs;
 
-  const auth = new GoogleAuth({
-    credentials,
-    scopes: "https://www.googleapis.com/auth/cloud-platform",
-  });
-
+async function startGeminiStream(onTranscript, onAudio, onReady) {
+  const auth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
   const client = await auth.getClient();
   const token = await client.getAccessToken();
 
-  const headers = {
-    Authorization: `Bearer ${token.token}`,
-    "Content-Type": "application/json",
-  };
-
-  const ws = new WebSocket(GEMINI_WS_URL, { headers });
-
-  ws.on("open", () => {
-    console.log("🧠 Gemini WebSocket connection established ✅");
-
-    // ✅ Send initial config only — no `contents`
-    ws.send(
-      JSON.stringify({
-        system_instruction: {
-          role: "system",
-          parts: [
-            {
-              text: "You are Anna, JP's helpful digital personal assistant. Speak clearly and naturally."
-            },
-          ],
-        },
-        config: {
-          audio_config: {
-            audio_encoding: "MULAW",
-            sample_rate_hertz: 8000,
-            language_code: "en-US",
-          },
-          response_config: {
-            response_type: "AUDIO",
-            audio_encoding: "MULAW",
-            sample_rate_hertz: 8000,
-          },
-        },
-      })
-    );
+  geminiWs = new WebSocket(`${GEMINI_WS_URL}?alt=speech`, {
+    headers: {
+      Authorization: `Bearer ${token.token}`,
+    },
   });
 
-  ws.on("message", (data) => {
-    try {
-      const parsed = JSON.parse(data.toString());
-      const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        console.log("🗣️ Gemini Transcript:", text);
-        if (onTranscriptCallback) onTranscriptCallback(text);
+  geminiWs.on("open", () => {
+    console.log("🧠 Gemini WebSocket connection established ✅");
+    onReady();
+  });
+
+  geminiWs.on("message", (data) => {
+    const message = JSON.parse(data.toString());
+    if (message.recognitionResult) {
+      const transcript = message.recognitionResult.transcript;
+      if (transcript && transcript.length > 0) {
+        onTranscript(transcript);
       }
-    } catch (err) {
-      console.error("❌ Error parsing Gemini message:", err);
+    } else if (message.audioResponse) {
+      const audioBuffer = Buffer.from(message.audioResponse.audio, "base64");
+      onAudio(audioBuffer);
     }
   });
 
-  ws.on("close", () => {
-    console.log("🧠 Gemini WebSocket closed");
+  geminiWs.on("close", () => {
+    console.log("❌ Gemini WebSocket connection closed");
   });
 
-  ws.on("error", (err) => {
+  geminiWs.on("error", (err) => {
     console.error("⚠️ Gemini WebSocket error:", err);
   });
-
-  const streamAudio = (base64Audio) => {
-    ws.send(
-      JSON.stringify({
-        audio: {
-          audio: base64Audio,
-        },
-      })
-    );
-  };
-
-  return { streamAudio };
 }
 
-module.exports = { startGeminiStream };
+function sendAudioToGemini(audioBuffer) {
+  if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
+    geminiWs.send(audioBuffer);
+  }
+}
+
+function closeGeminiStream() {
+  if (geminiWs) geminiWs.close();
+}
+
+module.exports = {
+  startGeminiStream,
+  sendAudioToGemini,
+  closeGeminiStream,
+};
