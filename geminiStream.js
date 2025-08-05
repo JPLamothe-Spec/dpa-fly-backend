@@ -3,17 +3,19 @@
 const WebSocket = require("ws");
 const { GoogleAuth } = require("google-auth-library");
 
-// ✅ Gemini model with audio input/output
-const GEMINI_WS_URL =
-  "wss://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-native-audio:streamGenerateContent";
+// ✅ Gemini config using JP's project
+const PROJECT_ID = "ai-voice-caller-id";
+const LOCATION = "us-central1"; // Change to "europe-west4" if needed
+
+// ✅ Vertex AI Gemini 2.0 streaming endpoint
+const GEMINI_WS_URL = `wss://${LOCATION}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
 
 async function startGeminiStream(onTranscriptCallback) {
-  // ✅ Parse credentials from Fly secret string
   const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
 
   const auth = new GoogleAuth({
-    credentials, // ✅ Pass parsed credentials directly
-    scopes: "https://www.googleapis.com/auth/cloud-platform",
+    credentials,
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
   });
 
   const client = await auth.getClient();
@@ -21,50 +23,61 @@ async function startGeminiStream(onTranscriptCallback) {
 
   const headers = {
     Authorization: `Bearer ${token.token}`,
-    "Content-Type": "application/json",
   };
 
   const ws = new WebSocket(GEMINI_WS_URL, { headers });
 
   ws.on("open", () => {
-    console.log("🧠 Gemini WebSocket connection established");
+    console.log("🧠 Gemini WebSocket connection established ✅");
 
+    // ✅ Initial setup payload for Gemini 2.0 Flash
     ws.send(
       JSON.stringify({
-        config: {
-          audioConfig: {
-            audioEncoding: "MULAW",
-            sampleRateHertz: 8000,
-            languageCode: "en-US",
+        setup: {
+          model: `projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/gemini-2.0-flash`,
+          generationConfig: {
+            responseModalities: ["text"],
+            audioConfig: {
+              samplingRate: 8000,
+              audioEncoding: "MULAW",
+            },
           },
-          text: {
-            context: "You are Anna, a friendly, intelligent digital personal assistant helping JP handle calls.",
-          },
-        },
+          systemInstruction: {
+            parts: [
+              {
+                text: "You are Anna, JP's friendly digital assistant answering phone calls."
+              }
+            ]
+          }
+        }
       })
     );
   });
 
   ws.on("message", (data) => {
     try {
-      const parsed = JSON.parse(data.toString());
+      const message = JSON.parse(data.toString());
 
-      const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        console.log("🗣️ Gemini Transcript:", text);
-        if (onTranscriptCallback) onTranscriptCallback(text);
+      if (message.candidates?.length) {
+        const text = message.candidates[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          console.log("🧠 Gemini Transcript:", text);
+          if (onTranscriptCallback) onTranscriptCallback(text);
+        }
+      } else {
+        console.log("📨 Gemini Event:", message);
       }
     } catch (err) {
-      console.error("❌ Error parsing Gemini message:", err);
+      console.error("❌ Failed to parse Gemini response:", err);
     }
-  });
-
-  ws.on("close", () => {
-    console.log("🧠 Gemini WebSocket closed");
   });
 
   ws.on("error", (err) => {
     console.error("⚠️ Gemini WebSocket error:", err);
+  });
+
+  ws.on("close", () => {
+    console.log("🧠 Gemini WebSocket closed");
   });
 
   const streamAudio = (base64Audio) => {
