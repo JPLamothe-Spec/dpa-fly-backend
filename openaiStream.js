@@ -1,63 +1,100 @@
 // openaiStream.js
 
-const WebSocket = require("ws");
+const https = require("https");
 const { v4: uuidv4 } = require("uuid");
+
 require("dotenv").config();
 
-const OPENAI_ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+let openaiRequest;
+let partialBuffer = "";
 
-let openaiWs;
+function startAIStream(onTranscript, onAudio, onReady) {
+  const sessionId = uuidv4();
 
-async function startAIStream(onTranscript, onAudio, onReady) {
-  const sessionId = uuidv4(); // unique ID per call
+  const requestPayload = {
+    model: "gpt-4o",
+    messages: [
+      {
+        role: "system",
+        content: "You are Anna, JP's friendly Australian digital assistant. Speak naturally and keep responses short and conversational.",
+      }
+    ],
+    stream: true,
+    max_tokens: 256,
+    temperature: 0.7
+  };
 
-  openaiWs = new WebSocket(
-    `wss://api.openai.com/v1/assistants/${OPENAI_ASSISTANT_ID}/rt?session_id=${sessionId}`,
+  const req = https.request(
     {
+      hostname: "api.openai.com",
+      path: "/v1/chat/completions",
+      method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      }
+    },
+    (res) => {
+      res.on("data", (chunk) => {
+        partialBuffer += chunk.toString();
+
+        const parts = partialBuffer.split("\n\n");
+        partialBuffer = parts.pop(); // Save incomplete part
+
+        for (const part of parts) {
+          if (!part || !part.startsWith("data:")) continue;
+
+          const jsonPart = part.replace(/^data:\s*/, "");
+          if (jsonPart === "[DONE]") {
+            console.log("✅ OpenAI stream complete");
+            closeAIStream();
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(jsonPart);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              onTranscript(content);
+            }
+          } catch (err) {
+            console.error("⚠️ Error parsing OpenAI stream chunk:", err);
+          }
+        }
+      });
+
+      res.on("end", () => {
+        console.log("❌ OpenAI stream ended");
+      });
     }
   );
 
-  openaiWs.on("open", () => {
-    console.log("🧠 OpenAI WebSocket connected ✅");
-    if (onReady) onReady();
+  req.on("error", (err) => {
+    console.error("❌ OpenAI stream error:", err);
   });
 
-  openaiWs.on("message", (data) => {
-    const message = JSON.parse(data.toString());
+  req.write(JSON.stringify(requestPayload));
+  req.flushHeaders?.();
+  openaiRequest = req;
 
-    if (message.type === "transcript" && message.transcript?.text) {
-      onTranscript(message.transcript.text);
-    } else if (message.type === "audio" && message.audio?.data) {
-      const audioBuffer = Buffer.from(message.audio.data, "base64");
-      onAudio(audioBuffer);
-    }
-  });
-
-  openaiWs.on("close", () => {
-    console.log("❌ OpenAI WebSocket closed");
-  });
-
-  openaiWs.on("error", (err) => {
-    console.error("⚠️ OpenAI WebSocket error:", err);
-  });
+  if (onReady) onReady();
 }
 
 function sendAudioToAI(audioBuffer) {
-  if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-    openaiWs.send(audioBuffer);
-  }
+  // GPT-4o chat completions doesn’t accept real-time audio input yet
+  // You could buffer and summarize audio post-call or pipe text instead
 }
 
 function closeAIStream() {
-  if (openaiWs) openaiWs.close();
+  if (openaiRequest) {
+    openaiRequest.end();
+    openaiRequest = null;
+  }
 }
 
 module.exports = {
   startAIStream,
   sendAudioToAI,
-  closeAIStream,
+  closeAIStream
 };
