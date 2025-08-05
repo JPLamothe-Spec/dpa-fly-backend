@@ -21,12 +21,13 @@ app.post("/twilio/voice", (req, res) => {
   console.log("📩 Twilio headers:", req.headers); // ✅ New line for diagnostics
 
   const twiml = `
-    <Response>
-      <Start>
-        <Stream url="wss://${req.headers.host}/media-stream" />
-      </Start>
-    </Response>
-  `.trim();
+  <Response>
+    <Pause length="1" />
+    <Start>
+      <Stream url="wss://${req.headers.host}/media-stream" />
+    </Start>
+  </Response>
+`.trim();
 
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
