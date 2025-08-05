@@ -2,15 +2,13 @@
 
 const WebSocket = require("ws");
 const fs = require("fs");
-const path = require("path");
 const { GoogleAuth } = require("google-auth-library");
-const fetch = require("node-fetch");
 
 const GEMINI_MODEL = "gemini-live-2.5-flash-preview-native-audio";
 const GEMINI_ENDPOINT = `wss://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent`;
 
 async function connectToGemini(onResponse) {
-  // Write JSON key from Fly secret to temp file (for auth)
+  // Write service account JSON to temp file (used by google-auth-library)
   const credsPath = "/tmp/gemini-service-account-key.json";
   fs.writeFileSync(credsPath, process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
 
@@ -18,7 +16,7 @@ async function connectToGemini(onResponse) {
   const client = await auth.getClient();
   const token = await client.getAccessToken();
 
-  const ws = new WebSocket(`${GEMINI_ENDPOINT}?alt=speech`, {
+  const ws = new WebSocket(GEMINI_ENDPOINT, {
     headers: {
       Authorization: `Bearer ${token.token}`,
     },
@@ -26,30 +24,30 @@ async function connectToGemini(onResponse) {
 
   ws.on("open", () => {
     console.log("🎙️ Connected to Gemini Live API");
-    
-    // Gemini expects a config message first
-    const config = {
-      config: {
-        audioConfig: {
-          audioEncoding: "LINEAR16",
-          sampleRateHertz: 8000, // Matches Twilio
-          languageCode: "en-US"
+
+    ws.send(
+      JSON.stringify({
+        config: {
+          audioConfig: {
+            audioEncoding: "LINEAR16",
+            sampleRateHertz: 8000,
+            languageCode: "en-US",
+          },
+          responseConfig: {
+            responseType: "AUDIO",
+            audioEncoding: "MULAW",
+            sampleRateHertz: 8000,
+          },
         },
-        responseConfig: {
-          responseType: "AUDIO",
-          audioEncoding: "MULAW",
-          sampleRateHertz: 8000,
-        }
-      }
-    };
-    ws.send(JSON.stringify(config));
+      })
+    );
   });
 
   ws.on("message", (data) => {
     try {
       const msg = JSON.parse(data.toString());
       if (msg.audio) {
-        onResponse(Buffer.from(msg.audio, "base64"));
+        onResponse(Buffer.from(msg.audio, "base64")); // 🔈 Raw audio reply
       } else if (msg.transcript) {
         console.log("📝 Transcript:", msg.transcript);
       } else {
@@ -63,7 +61,8 @@ async function connectToGemini(onResponse) {
   ws.on("close", () => console.log("🔌 Gemini WebSocket closed"));
   ws.on("error", (err) => console.error("❌ Gemini WebSocket error:", err));
 
-  return ws; // Return raw WebSocket so you can pipe audio in
+  return ws;
 }
 
 module.exports = { connectToGemini };
+
