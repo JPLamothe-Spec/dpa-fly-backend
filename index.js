@@ -3,7 +3,6 @@ const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const bodyParser = require("body-parser");
-const { startGeminiStream } = require("./geminiStream");
 require("dotenv").config();
 
 const app = express();
@@ -20,7 +19,6 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.post("/twilio/voice", (req, res) => {
   console.log("📞 Twilio webhook hit");
 
-  // ✅ Use static public hostname (Fly modifies host headers)
   const twiml = `
     <Response>
       <Start>
@@ -37,38 +35,15 @@ app.post("/twilio/voice", (req, res) => {
 // ✅ WebSocket server for Twilio <Stream>
 const wss = new WebSocket.Server({ noServer: true });
 
-wss.on("connection", (twilioWs) => {
-  console.log("✅ WebSocket connection from Twilio established");
+wss.on("connection", (ws) => {
+  console.log("✅ WebSocket connection established");
 
-  let gemini = null;
-
-  // 🔁 Start Gemini stream asynchronously
-  startGeminiStream((transcript) => {
-    console.log("📝 Transcript from Gemini:", transcript);
-  }).then(({ streamAudio }) => {
-    gemini = { streamAudio };
-    console.log("🧠 Gemini stream ready");
-  }).catch((err) => {
-    console.error("❌ Failed to start Gemini stream:", err);
+  ws.on("message", (msg) => {
+    console.log("📨 Media Stream Message:", msg.toString().slice(0, 100), "...");
   });
 
-  twilioWs.on("message", (msg) => {
-    try {
-      const message = JSON.parse(msg);
-      if (message.event === "media" && message.media?.payload) {
-        if (gemini?.streamAudio) {
-          gemini.streamAudio(message.media.payload);
-        }
-      } else if (message.event === "start") {
-        console.log("🔔 Twilio stream started");
-      }
-    } catch (err) {
-      console.error("❌ Error handling Twilio message:", err);
-    }
-  });
-
-  twilioWs.on("close", () => {
-    console.log("❌ WebSocket from Twilio closed");
+  ws.on("close", () => {
+    console.log("❌ WebSocket connection closed");
   });
 });
 
