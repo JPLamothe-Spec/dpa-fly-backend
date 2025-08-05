@@ -38,6 +38,16 @@ async function startGeminiStream(onTranscriptCallback) {
             },
           ],
         },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: "Hello",
+              },
+            ],
+          },
+        ],
         config: {
           audioConfig: {
             audioEncoding: "MULAW",
