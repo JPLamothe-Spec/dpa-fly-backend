@@ -2,7 +2,6 @@
 
 const WebSocket = require("ws");
 const { GoogleAuth } = require("google-auth-library");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { PassThrough } = require("stream");
 
 const GEMINI_WS_URL =
