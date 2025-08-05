@@ -3,7 +3,6 @@
 const WebSocket = require("ws");
 const { GoogleAuth } = require("google-auth-library");
 
-// ✅ Gemini endpoint for native audio
 const GEMINI_WS_URL =
   "wss://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-native-audio:streamGenerateContent";
 
@@ -28,17 +27,28 @@ async function startGeminiStream(onTranscriptCallback) {
   ws.on("open", () => {
     console.log("🧠 Gemini WebSocket connection established ✅");
 
-    // Send initial config
+    // ✅ Send initial config and parts
     ws.send(
       JSON.stringify({
+        system_instruction: {
+          role: "system",
+          parts: [
+            {
+              text:
+                "You are Anna, JP's helpful digital personal assistant. Speak clearly and naturally."
+            },
+          ],
+        },
         config: {
           audioConfig: {
             audioEncoding: "MULAW",
             sampleRateHertz: 8000,
             languageCode: "en-US",
           },
-          text: {
-            context: "You are Anna, JP's helpful digital personal assistant. You’re listening to the caller and will respond naturally.",
+          responseConfig: {
+            responseType: "AUDIO",
+            audioEncoding: "MULAW",
+            sampleRateHertz: 8000,
           },
         },
       })
@@ -47,15 +57,11 @@ async function startGeminiStream(onTranscriptCallback) {
 
   ws.on("message", (data) => {
     try {
-      const message = JSON.parse(data.toString());
-
-      // ✅ Check for transcript in typical Gemini format
-      const text = message.candidates?.[0]?.content?.parts?.[0]?.text;
+      const parsed = JSON.parse(data.toString());
+      const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
       if (text) {
         console.log("🗣️ Gemini Transcript:", text);
         if (onTranscriptCallback) onTranscriptCallback(text);
-      } else {
-        console.log("📥 Gemini message (no text):", JSON.stringify(message));
       }
     } catch (err) {
       console.error("❌ Error parsing Gemini message:", err);
@@ -70,7 +76,6 @@ async function startGeminiStream(onTranscriptCallback) {
     console.error("⚠️ Gemini WebSocket error:", err);
   });
 
-  // 🎙️ Stream audio into Gemini
   const streamAudio = (base64Audio) => {
     ws.send(
       JSON.stringify({
