@@ -1,64 +1,102 @@
-// openaiStream.js
+// index.js
 
+const express = require("express");
+const http = require("http");
 const WebSocket = require("ws");
-const { v4: uuidv4 } = require("uuid");
+const bodyParser = require("body-parser");
 require("dotenv").config();
 
-const OPENAI_ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
-let openaiWs;
-
-async function startAIStream(onTranscript, onAudio, onReady) {
-  const sessionId = uuidv4(); // unique ID per call
-
-  openaiWs = new WebSocket(
-    `wss://api.openai.com/v1/assistants/${OPENAI_ASSISTANT_ID}/rt?session_id=${sessionId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-    }
-  );
-
-  openaiWs.on("open", () => {
-    console.log("🧠 OpenAI WebSocket connected ✅");
-    if (onReady) onReady();
-  });
-
-  openaiWs.on("message", (data) => {
-    const message = JSON.parse(data.toString());
-
-    if (message.type === "transcript" && message.transcript?.text) {
-      onTranscript(message.transcript.text);
-    } else if (message.type === "audio" && message.audio?.data) {
-      const audioBuffer = Buffer.from(message.audio.data, "base64");
-      onAudio(audioBuffer);
-    }
-  });
-
-  openaiWs.on("close", () => {
-    console.log("❌ OpenAI WebSocket closed");
-  });
-
-  openaiWs.on("error", (err) => {
-    console.error("⚠️ OpenAI WebSocket error:", err);
-  });
-}
-
-function sendAudioToAI(audioBuffer) {
-  if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-    openaiWs.send(audioBuffer);
-  }
-}
-
-function closeAIStream() {
-  if (openaiWs) openaiWs.close();
-}
-
-module.exports = {
+const {
   startAIStream,
   sendAudioToAI,
   closeAIStream,
-};
+} = require("./openaiStream");
 
+const app = express();
+app.use(bodyParser.urlencoded({ extended: false }));
+
+const PORT = process.env.PORT || 3000;
+
+// ✅ Twilio webhook endpoint for incoming calls
+app.post("/twilio/voice", (req, res) => {
+  const twiml = `
+    <Response>
+      <Start>
+        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+      </Start>
+      <Pause length="1"/>
+    </Response>
+  `;
+  res.set("Content-Type", "text/xml");
+  res.set("Content-Length", Buffer.byteLength(twiml));
+  res.send(twiml);
+});
+
+// ✅ Create HTTP server and bind WebSocket upgrade
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ noServer: true });
+
+server.on("upgrade", (req, socket, head) => {
+  if (req.url === "/media-stream") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
+// ✅ Handle incoming Twilio <Stream> media
+wss.on("connection", (ws) => {
+  console.log("✅ WebSocket connection established");
+
+  // Buffer: send audio from Twilio to OpenAI
+  const handleTranscript = (text) => {
+    console.log("📝 Transcript:", text);
+  };
+
+  const handleAudioResponse = (audioBuffer) => {
+    const response = {
+      event: "media",
+      media: {
+        payload: audioBuffer.toString("base64"),
+      },
+    };
+    ws.send(JSON.stringify(response));
+  };
+
+  startAIStream(handleTranscript, handleAudioResponse, () => {
+    console.log("🧠 GPT‑4o stream ready");
+  });
+
+  ws.on("message", (msg) => {
+    try {
+      const data = JSON.parse(msg);
+      if (data.event === "media" && data.media?.payload) {
+        const audioBuffer = Buffer.from(data.media.payload, "base64");
+        sendAudioToAI(audioBuffer);
+      } else if (data.event === "stop") {
+        console.log("⛔ Twilio stream stopped");
+        closeAIStream();
+        ws.close();
+      }
+    } catch (err) {
+      console.error("❌ WebSocket message error:", err);
+    }
+  });
+
+  ws.on("close", () => {
+    console.log("❌ WebSocket connection closed");
+    closeAIStream();
+  });
+
+  ws.on("error", (err) => {
+    console.error("⚠️ WebSocket error:", err);
+    closeAIStream();
+  });
+});
+
+// ✅ Start server
+server.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
