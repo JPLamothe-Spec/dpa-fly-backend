@@ -16,7 +16,7 @@ app.get("/", (req, res) => res.status(200).send("OK"));
 // ✅ Parse POST body
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// ✅ Twilio Voice Webhook — return <Start><Stream> immediately
+// ✅ Twilio Voice Webhook — respond with <Start><Stream>
 app.post("/twilio/voice", (req, res) => {
   console.log("📞 Twilio webhook hit");
 
@@ -41,7 +41,7 @@ wss.on("connection", (twilioWs) => {
 
   let gemini = null;
 
-  // 🔁 Start Gemini stream asynchronously (do NOT block Twilio)
+  // 🔁 Start Gemini stream asynchronously
   startGeminiStream((transcript) => {
     console.log("📝 Transcript from Gemini:", transcript);
   }).then(({ streamAudio }) => {
@@ -71,7 +71,7 @@ wss.on("connection", (twilioWs) => {
   });
 });
 
-// ✅ Upgrade HTTP connection to WebSocket
+// ✅ WebSocket upgrade route
 server.on("upgrade", (req, socket, head) => {
   console.log("🔁 WebSocket upgrade request to:", req.url);
   if (req.url === "/media-stream") {
@@ -83,7 +83,7 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-// ✅ Start the server
+// ✅ Start server
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
