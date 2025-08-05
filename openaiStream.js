@@ -1,85 +1,102 @@
-// openaiStream.js
+// geminiStream.js
 
 const WebSocket = require("ws");
-const { v4: uuidv4 } = require("uuid");
-require("dotenv").config();
+const { GoogleAuth } = require("google-auth-library");
 
-console.log("🧠 openaiStream.js loaded");
+const GEMINI_WS_URL =
+  "wss://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-preview-native-audio:streamGenerateContent";
 
-// Load env vars
-const OPENAI_ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+async function startGeminiStream(onTranscriptCallback) {
+  const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
 
-if (!OPENAI_ASSISTANT_ID || !OPENAI_API_KEY) {
-  throw new Error("❌ Missing OPENAI_ASSISTANT_ID or OPENAI_API_KEY in environment variables");
-}
+  const auth = new GoogleAuth({
+    credentials,
+    scopes: "https://www.googleapis.com/auth/cloud-platform",
+  });
 
-let openaiWs;
+  const client = await auth.getClient();
+  const token = await client.getAccessToken();
 
-async function startAIStream(onTranscript, onAudio, onReady) {
-  const sessionId = uuidv4(); // unique session ID for each call
-  const wsUrl = `wss://api.openai.com/v1/assistants/${OPENAI_ASSISTANT_ID}/rt?session_id=${sessionId}`;
+  const headers = {
+    Authorization: `Bearer ${token.token}`,
+    "Content-Type": "application/json",
+  };
 
-  console.log("🔗 Connecting to OpenAI Realtime WS:", wsUrl);
-  console.log("🔐 API Key Prefix:", OPENAI_API_KEY.slice(0, 12));
+  const ws = new WebSocket(GEMINI_WS_URL, { headers });
 
-  try {
-    openaiWs = new WebSocket(wsUrl, {
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        Origin: "https://api.openai.com", // Required in some envs
-      },
-    });
+  ws.on("open", () => {
+    console.log("🧠 Gemini WebSocket connection established ✅");
 
-    openaiWs.on("open", () => {
-      console.log("🧠 OpenAI WebSocket connected ✅");
-      setTimeout(() => {
-        if (onReady) onReady();
-      }, 100); // slight delay helps with readiness
-    });
+    // ✅ Send initial config only — no `contents`
+    ws.send(
+      JSON.stringify({
+        system_instruction: {
+          role: "system",
+          parts: [
+            {
+              text: "You are Anna, JP's helpful digital personal assistant. Speak clearly and naturally."
+            },
+          ],
+        },
+        config: {
+          audio_config: {
+            audio_encoding: "MULAW",
+            sample_rate_hertz: 8000,
+            language_code: "en-US",
+          },
+          response_config: {
+            response_type: "AUDIO",
+            audio_encoding: "MULAW",
+            sample_rate_hertz: 8000,
+          },
+        },
+      })
+    );
+  });
 
-    openaiWs.on("message", (data) => {
-      try {
-        const message = JSON.parse(data.toString());
-
-        if (message.type === "transcript" && message.transcript?.text) {
-          console.log("📝 Transcript:", message.transcript.text);
-          onTranscript(message.transcript.text);
-        } else if (message.type === "audio" && message.audio?.data) {
-          const audioBuffer = Buffer.from(message.audio.data, "base64");
-          onAudio(audioBuffer);
-        }
-      } catch (err) {
-        console.error("⚠️ Error parsing message from OpenAI:", err);
+  ws.on("message", (data) => {
+    try {
+      const parsed = JSON.parse(data.toString());
+      const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) {
+        console.log("🗣️ Gemini Transcript:", text);
+        if (onTranscriptCallback) onTranscriptCallback(text);
       }
-    });
+    } catch (err) {
+      console.error("❌ Error parsing Gemini message:", err);
+    }
+  });
 
-    openaiWs.on("close", () => {
-      console.log("❌ OpenAI WebSocket closed");
-    });
+  ws.on("close", () => {
+    console.log("🧠 Gemini WebSocket closed");
+  });
 
-    openaiWs.on("error", (err) => {
-      console.error("⚠️ OpenAI WebSocket error:", err);
-    });
-  } catch (err) {
-    console.error("❌ Failed to start AI stream:", err);
-  }
+  ws.on("error", (err) => {
+    console.error("⚠️ Gemini WebSocket error:", err);
+  });
+
+  const streamAudio = (base64Audio) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          audio: {
+            audio: base64Audio,
+          },
+        })
+      );
+    } else {
+      console.warn("🚫 Tried to stream audio but Gemini WebSocket was not open");
+    }
+  };
+
+  const closeStream = () => {
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close();
+    }
+  };
+
+  return { streamAudio, closeStream };
 }
 
-function sendAudioToAI(audioBuffer) {
-  if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-    openaiWs.send(audioBuffer);
-  } else {
-    console.warn("🚫 Tried to send audio before WebSocket was open");
-  }
-}
+module.exports = { startGeminiStream };
 
-function closeAIStream() {
-  if (openaiWs) openaiWs.close();
-}
-
-module.exports = {
-  startAIStream,
-  sendAudioToAI,
-  closeAIStream,
-};
