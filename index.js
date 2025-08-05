@@ -15,8 +15,10 @@ app.use(bodyParser.urlencoded({ extended: false }));
 // ✅ Health check route
 app.get("/", (req, res) => res.status(200).send("OK"));
 
-// ✅ Twilio webhook
+// ✅ Twilio webhook route for incoming calls
 app.post("/twilio/voice", (req, res) => {
+  console.log("📞 Twilio webhook hit");
+
   const twiml = `
     <Response>
       <Start>
@@ -51,6 +53,8 @@ wss.on("connection", async (twilioWs) => {
         if (message.event === "media" && message.media?.payload) {
           const base64Audio = message.media.payload;
           gemini.streamAudio(base64Audio);
+        } else if (message.event === "start") {
+          console.log("🔔 Twilio stream started");
         }
       } catch (err) {
         console.error("❌ Error handling Twilio message:", err);
@@ -81,4 +85,3 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
-
