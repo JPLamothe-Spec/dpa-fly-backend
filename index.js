@@ -90,7 +90,7 @@ wss.on("connection", (ws) => {
     closeAIStream();
   });
 });
-
+app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 // ✅ Start server
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
