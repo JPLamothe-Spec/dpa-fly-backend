@@ -10,7 +10,11 @@ const GEMINI_WS_URL =
 let geminiWs;
 
 async function startGeminiStream(onTranscript, onAudio, onReady) {
-  const auth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
+  const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+  const auth = new GoogleAuth({
+    credentials,
+    scopes: "https://www.googleapis.com/auth/cloud-platform",
+  });
   const client = await auth.getClient();
   const token = await client.getAccessToken();
 
@@ -62,3 +66,4 @@ module.exports = {
   sendAudioToGemini,
   closeGeminiStream,
 };
+
