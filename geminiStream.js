@@ -27,10 +27,10 @@ async function startGeminiStream(onTranscriptCallback) {
   ws.on("open", () => {
     console.log("🧠 Gemini WebSocket connection established ✅");
 
-    // ✅ Send initial config and parts (correct schema)
+    // ✅ Send initial config only — no `contents`
     ws.send(
       JSON.stringify({
-        systemInstruction: {
+        system_instruction: {
           role: "system",
           parts: [
             {
@@ -38,26 +38,16 @@ async function startGeminiStream(onTranscriptCallback) {
             },
           ],
         },
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: "Hello",
-              },
-            ],
-          },
-        ],
         config: {
-          audioConfig: {
-            audioEncoding: "MULAW",
-            sampleRateHertz: 8000,
-            languageCode: "en-US",
+          audio_config: {
+            audio_encoding: "MULAW",
+            sample_rate_hertz: 8000,
+            language_code: "en-US",
           },
-          responseConfig: {
-            responseType: "AUDIO",
-            audioEncoding: "MULAW",
-            sampleRateHertz: 8000,
+          response_config: {
+            response_type: "AUDIO",
+            audio_encoding: "MULAW",
+            sample_rate_hertz: 8000,
           },
         },
       })
