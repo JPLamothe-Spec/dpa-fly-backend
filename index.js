@@ -18,6 +18,7 @@ app.get("/", (req, res) => res.status(200).send("OK"));
 // ✅ Twilio webhook route for incoming calls
 app.post("/twilio/voice", (req, res) => {
   console.log("📞 Twilio webhook hit");
+  console.log("📩 Twilio headers:", req.headers); // ✅ New line for diagnostics
 
   const twiml = `
     <Response>
