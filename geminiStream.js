@@ -27,15 +27,14 @@ async function startGeminiStream(onTranscriptCallback) {
   ws.on("open", () => {
     console.log("🧠 Gemini WebSocket connection established ✅");
 
-    // ✅ Send initial config and parts
+    // ✅ Send initial config and parts (correct schema)
     ws.send(
       JSON.stringify({
-        system_instruction: {
+        systemInstruction: {
           role: "system",
           parts: [
             {
-              text:
-                "You are Anna, JP's helpful digital personal assistant. Speak clearly and naturally."
+              text: "You are Anna, JP's helpful digital personal assistant. Speak clearly and naturally."
             },
           ],
         },
