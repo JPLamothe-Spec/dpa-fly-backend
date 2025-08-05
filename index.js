@@ -3,7 +3,7 @@ const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const bodyParser = require("body-parser");
-const { connectToGemini } = require("./geminiStream");
+const { startGeminiStream } = require("./geminiStream");
 require("dotenv").config();
 
 const app = express();
@@ -35,44 +35,38 @@ const wss = new WebSocket.Server({ noServer: true });
 wss.on("connection", async (twilioWs) => {
   console.log("✅ WebSocket connection from Twilio established");
 
-  // Connect to Gemini
-  const gemini = await connectToGemini(
-    (audio) => {
-      // TODO: Send audio back to Twilio when two-way audio is supported
-      // twilioWs.send(...)
-    },
-    (transcript) => {
-      console.log("📝 Transcript:", transcript);
-    }
-  );
+  let gemini;
 
-  twilioWs.on("message", (msg) => {
-    try {
-      const message = JSON.parse(msg);
-      if (message.event === "media" && message.media?.payload) {
-        const audioData = Buffer.from(message.media.payload, "base64");
-        gemini.send(JSON.stringify({
-          realtimeInput: {
-            mediaChunks: [
-              {
-                mimeType: "audio/pcm;rate=8000",
-                data: message.media.payload
-              }
-            ]
-          }
-        }));
+  try {
+    const { streamAudio } = await startGeminiStream((transcript) => {
+      console.log("📝 Transcript from Gemini:", transcript);
+      // TODO: Send reply audio back to Twilio once synthesis is added
+    });
+
+    gemini = { streamAudio };
+
+    twilioWs.on("message", (msg) => {
+      try {
+        const message = JSON.parse(msg);
+        if (message.event === "media" && message.media?.payload) {
+          const base64Audio = message.media.payload;
+          gemini.streamAudio(base64Audio); // 🔁 Stream audio to Gemini
+        }
+      } catch (err) {
+        console.error("❌ Error handling Twilio message:", err);
       }
-    } catch (err) {
-      console.error("Error handling Twilio message:", err);
-    }
-  });
+    });
 
-  twilioWs.on("close", () => {
-    console.log("❌ WebSocket from Twilio closed");
-    gemini.close();
-  });
+    twilioWs.on("close", () => {
+      console.log("❌ WebSocket from Twilio closed");
+    });
+
+  } catch (err) {
+    console.error("❌ Failed to start Gemini stream:", err);
+  }
 });
 
+// ✅ WebSocket upgrade route
 server.on("upgrade", (req, socket, head) => {
   if (req.url === "/media-stream") {
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -86,3 +80,4 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
+
