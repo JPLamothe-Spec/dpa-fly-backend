@@ -20,10 +20,11 @@ app.post("/twilio/voice", (req, res) => {
   const twiml = `
     <Response>
       <Start>
-        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+        <Stream url="wss://${req.headers.host}/media-stream" />
       </Start>
     </Response>
-  `;
+  `.trim();
+
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
   res.send(twiml);
@@ -40,7 +41,6 @@ wss.on("connection", async (twilioWs) => {
   try {
     const { streamAudio } = await startGeminiStream((transcript) => {
       console.log("📝 Transcript from Gemini:", transcript);
-      // TODO: Send reply audio back to Twilio once synthesis is added
     });
 
     gemini = { streamAudio };
@@ -50,7 +50,7 @@ wss.on("connection", async (twilioWs) => {
         const message = JSON.parse(msg);
         if (message.event === "media" && message.media?.payload) {
           const base64Audio = message.media.payload;
-          gemini.streamAudio(base64Audio); // 🔁 Stream audio to Gemini
+          gemini.streamAudio(base64Audio);
         }
       } catch (err) {
         console.error("❌ Error handling Twilio message:", err);
@@ -68,6 +68,7 @@ wss.on("connection", async (twilioWs) => {
 
 // ✅ WebSocket upgrade route
 server.on("upgrade", (req, socket, head) => {
+  console.log("🔁 WebSocket upgrade request to:", req.url);
   if (req.url === "/media-stream") {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
