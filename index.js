@@ -1,79 +1,64 @@
-// index.js
-const express = require("express");
-const http = require("http");
+// openaiStream.js
+
 const WebSocket = require("ws");
-const bodyParser = require("body-parser");
-const { startGeminiStream } = require("./geminiStream"); // ✅ Gemini stub
+const { v4: uuidv4 } = require("uuid");
 require("dotenv").config();
 
-const app = express();
-const server = http.createServer(app);
-const PORT = process.env.PORT || 3000;
+const OPENAI_ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// ✅ Health check
-app.get("/", (req, res) => res.status(200).send("OK"));
+let openaiWs;
 
-// ✅ Parse Twilio webhook data
-app.use(bodyParser.urlencoded({ extended: false }));
+async function startAIStream(onTranscript, onAudio, onReady) {
+  const sessionId = uuidv4(); // unique ID per call
 
-// ✅ Twilio <Start><Stream> response
-app.post("/twilio/voice", (req, res) => {
-  console.log("📞 Twilio webhook hit");
+  openaiWs = new WebSocket(
+    `wss://api.openai.com/v1/assistants/${OPENAI_ASSISTANT_ID}/rt?session_id=${sessionId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+    }
+  );
 
-  const twiml = `
-    <Response>
-      <Start>
-        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
-      </Start>
-      <Pause length="1"/>
-    </Response>
-  `.trim();
-
-  res.set("Content-Type", "text/xml");
-  res.set("Content-Length", Buffer.byteLength(twiml));
-  res.send(twiml);
-});
-
-// ✅ WebSocket server for Twilio stream
-const wss = new WebSocket.Server({ noServer: true });
-
-wss.on("connection", (ws) => {
-  console.log("✅ WebSocket connection established");
-
-  // 🔁 Connect to Gemini in the background (non-blocking)
-  let gemini = null;
-  startGeminiStream((transcript) => {
-    console.log("🧠 Gemini Transcript:", transcript);
-  }).then(({ streamAudio }) => {
-    gemini = { streamAudio };
-    console.log("🧠 Gemini stream ready");
-  }).catch((err) => {
-    console.error("❌ Gemini connection failed:", err);
+  openaiWs.on("open", () => {
+    console.log("🧠 OpenAI WebSocket connected ✅");
+    if (onReady) onReady();
   });
 
-  // ✅ Receive Twilio media stream
-  ws.on("message", (msg) => {
-    console.log("📨 Media Stream Message:", msg.toString().slice(0, 100), "...");
+  openaiWs.on("message", (data) => {
+    const message = JSON.parse(data.toString());
+
+    if (message.type === "transcript" && message.transcript?.text) {
+      onTranscript(message.transcript.text);
+    } else if (message.type === "audio" && message.audio?.data) {
+      const audioBuffer = Buffer.from(message.audio.data, "base64");
+      onAudio(audioBuffer);
+    }
   });
 
-  ws.on("close", () => {
-    console.log("❌ WebSocket connection closed");
+  openaiWs.on("close", () => {
+    console.log("❌ OpenAI WebSocket closed");
   });
-});
 
-// ✅ Upgrade HTTP to WebSocket
-server.on("upgrade", (req, socket, head) => {
-  if (req.url === "/media-stream") {
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req);
-    });
-  } else {
-    socket.destroy();
+  openaiWs.on("error", (err) => {
+    console.error("⚠️ OpenAI WebSocket error:", err);
+  });
+}
+
+function sendAudioToAI(audioBuffer) {
+  if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+    openaiWs.send(audioBuffer);
   }
-});
+}
 
-// ✅ Start server
-server.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
-});
+function closeAIStream() {
+  if (openaiWs) openaiWs.close();
+}
+
+module.exports = {
+  startAIStream,
+  sendAudioToAI,
+  closeAIStream,
+};
 
