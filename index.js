@@ -8,26 +8,22 @@ const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
-// ✅ Health check route for Fly.io
+// ✅ Health check for Fly.io
 app.get("/", (req, res) => {
   res.status(200).send("OK");
 });
 
-// ✅ Parse incoming POST data
+// ✅ Parse POST data from Twilio
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// ✅ Twilio webhook route
+// ✅ Twilio Voice Webhook — Send <Start><Stream> immediately
 app.post("/twilio/voice", (req, res) => {
   const twiml = `
     <Response>
-     <Pause length="2"/>
-<Say voice="Polly.Joanna">
-  Hi, this is Anna, JP's digital personal assistant, would you like me to pass on a message?
-</Say>
-<Pause length="1"/>
       <Start>
         <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
       </Start>
+      <Pause length="1"/>
     </Response>
   `;
   res.set("Content-Type", "text/xml");
@@ -35,15 +31,15 @@ app.post("/twilio/voice", (req, res) => {
   res.send(twiml);
 });
 
-// ✅ WebSocket server setup
+// ✅ WebSocket handler
 const wss = new WebSocket.Server({ noServer: true });
 
 wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established");
 
   ws.on("message", (msg) => {
-    console.log("📨 Media Stream Message:", msg.toString().slice(0, 80), "...");
-    // You can handle audio or events here
+    console.log("📨 Media Stream Message:", msg.toString().slice(0, 100), "...");
+    // ✳️ Here is where you’ll connect Gemini later to respond
   });
 
   ws.on("close", () => {
@@ -51,7 +47,7 @@ wss.on("connection", (ws) => {
   });
 });
 
-// ✅ Bind WebSocket upgrade manually
+// ✅ Handle WebSocket upgrade manually
 server.on("upgrade", (request, socket, head) => {
   if (request.url === "/media-stream") {
     wss.handleUpgrade(request, socket, head, (ws) => {
