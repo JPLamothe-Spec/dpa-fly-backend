@@ -20,10 +20,11 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.post("/twilio/voice", (req, res) => {
   const twiml = `
     <Response>
-      <Say voice="Polly.Joanna">
-        Hi, this is Anna, JP's digital personal assistant, would you like me to pass on a message?
-      </Say>
-      <Pause length="2"/>
+     <Pause length="2"/>
+<Say voice="Polly.Joanna">
+  Hi, this is Anna, JP's digital personal assistant, would you like me to pass on a message?
+</Say>
+<Pause length="1"/>
       <Start>
         <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
       </Start>
