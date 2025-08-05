@@ -22,6 +22,7 @@ app.post("/twilio/voice", (req, res) => {
     <Response>
       <Say voice="Polly.Joanna">
         Hi, this is Anna, JP's digital personal assistant, would you like me to pass on a message?
+      <Pause length="2"/>
       </Say>
       <Start>
         <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
