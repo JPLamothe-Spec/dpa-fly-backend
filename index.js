@@ -20,10 +20,11 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.post("/twilio/voice", (req, res) => {
   console.log("📞 Twilio webhook hit");
 
+  // ✅ Use static public hostname (Fly modifies host headers)
   const twiml = `
     <Response>
       <Start>
-        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+        <Stream url="wss://dpa-fly-backend-ufegxw.fly.dev/media-stream" track="inbound_track" />
       </Start>
     </Response>
   `.trim();
