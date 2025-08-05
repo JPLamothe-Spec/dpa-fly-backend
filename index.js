@@ -46,10 +46,15 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-// ✅ Handle incoming Twilio <Stream> media
-wss.on("connection", (ws) => {
-  console.log("✅ WebSocket connection established");
+// ✅ Health check route
+app.get("/", (req, res) => {
+  res.status(200).send("DPA backend is running");
+});
 
+// ✅ Start server
+server.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
   // Buffer: send audio from Twilio to OpenAI
   const handleTranscript = (text) => {
     console.log("📝 Transcript:", text);
