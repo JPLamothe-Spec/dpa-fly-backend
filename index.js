@@ -14,10 +14,9 @@ const {
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
-
 const PORT = process.env.PORT || 3000;
 
-// ✅ Twilio webhook endpoint for incoming calls
+// ✅ Twilio webhook
 app.post("/twilio/voice", (req, res) => {
   const twiml = `
     <Response>
@@ -32,7 +31,7 @@ app.post("/twilio/voice", (req, res) => {
   res.send(twiml);
 });
 
-// ✅ Create HTTP server and bind WebSocket upgrade
+// ✅ Server + WebSocket
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 
@@ -46,26 +45,23 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-// ✅ Handle WebSocket connections
+// ✅ Media stream handler
 wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established");
 
   const handleTranscript = (text) => {
-    console.log("📝 Transcript:", text);
+    console.log("📝 GPT Response:", text);
+
+    // Optionally: stream back TTS audio here
+    // const response = {
+    //   event: "media",
+    //   media: { payload: base64Audio }
+    // };
+    // ws.send(JSON.stringify(response));
   };
 
-  const handleAudioResponse = (audioBuffer) => {
-    const response = {
-      event: "media",
-      media: {
-        payload: audioBuffer.toString("base64"),
-      },
-    };
-    ws.send(JSON.stringify(response));
-  };
-
-  startAIStream(handleTranscript, handleAudioResponse, () => {
-    console.log("🧠 GPT‑4o stream ready");
+  startAIStream(handleTranscript, null, () => {
+    console.log("🧠 GPT-4o text stream ready");
   });
 
   ws.on("message", (msg) => {
@@ -73,7 +69,7 @@ wss.on("connection", (ws) => {
       const data = JSON.parse(msg);
       if (data.event === "media" && data.media?.payload) {
         const audioBuffer = Buffer.from(data.media.payload, "base64");
-        sendAudioToAI(audioBuffer);
+        sendAudioToAI(audioBuffer); // optional for future transcription
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
         closeAIStream();
@@ -93,11 +89,6 @@ wss.on("connection", (ws) => {
     console.error("⚠️ WebSocket error:", err);
     closeAIStream();
   });
-});
-
-// ✅ Health check route
-app.get("/", (req, res) => {
-  res.status(200).send("DPA backend is running");
 });
 
 // ✅ Start server
