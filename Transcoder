@@ -1,0 +1,51 @@
+// transcoder.js
+const ffmpeg = require("fluent-ffmpeg");
+const ffmpegPath = require("ffmpeg-static");
+const { PassThrough } = require("stream");
+
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+let ffmpegProcess;
+let inputStream;
+
+function startTranscoder(onChunk) {
+  inputStream = new PassThrough();
+
+  ffmpegProcess = ffmpeg(inputStream)
+    .inputFormat("mulaw")
+    .audioFrequency(8000)
+    .audioCodec("pcm_s16le")
+    .audioChannels(1)
+    .format("s16le")
+    .on("error", (err) => {
+      console.error("❌ ffmpeg error:", err);
+    })
+    .on("start", () => {
+      console.log("🎙️ ffmpeg transcoder started");
+    })
+    .pipe();
+
+  ffmpegProcess.on("data", onChunk);
+}
+
+function pipeToTranscoder(buffer) {
+  if (inputStream && !inputStream.destroyed) {
+    inputStream.write(buffer);
+  }
+}
+
+function stopTranscoder() {
+  if (inputStream && !inputStream.destroyed) {
+    inputStream.end();
+  }
+  if (ffmpegProcess && ffmpegProcess.destroy) {
+    ffmpegProcess.destroy();
+    console.log("🛑 ffmpeg transcoder stopped");
+  }
+}
+
+module.exports = {
+  startTranscoder,
+  pipeToTranscoder,
+  stopTranscoder,
+};
