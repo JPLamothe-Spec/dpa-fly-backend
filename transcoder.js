@@ -1,3 +1,4 @@
+// transcoder.js
 const prism = require("prism-media");
 
 let transcoder = null;
@@ -16,8 +17,8 @@ function startTranscoder(onData) {
     ]
   });
 
-  // ✅ Correct stream
-  transcoder.stdout.on("data", onData);
+  // ✅ Listen directly on the transcoder stream
+  transcoder.on("data", onData);
 
   transcoder.on("error", (err) => {
     console.error("❌ Transcoder error:", err);
