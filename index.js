@@ -48,6 +48,7 @@ wss.on("connection", (ws) => {
 
   let currentStreamSid = null;
   let isStreamAlive = true;
+  let transcoderReady = false;
 
   const handleTranscript = async (text) => {
     console.log("📝 GPT Response:", text);
@@ -63,6 +64,7 @@ wss.on("connection", (ws) => {
   );
 
   startTranscoder((chunk) => {
+    transcoderReady = true;
     if (isStreamAlive) sendAudioToAI(chunk);
   });
 
@@ -77,7 +79,11 @@ wss.on("connection", (ws) => {
             console.log("🔗 Captured streamSid:", currentStreamSid);
           }
           const audioBuffer = Buffer.from(data.media.payload, "base64");
-          pipeToTranscoder(audioBuffer);
+          if (transcoderReady) {
+            pipeToTranscoder(audioBuffer);
+          } else {
+            console.warn("⚠️ Audio skipped — transcoder not ready yet");
+          }
         }
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
