@@ -22,7 +22,6 @@ app.post("/twilio/voice", (req, res) => {
       <Pause length="30"/>
     </Response>
   `;
-
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
   res.send(twiml);
@@ -49,12 +48,14 @@ wss.on("connection", (ws) => {
   let currentStreamSid = null;
   let isStreamAlive = true;
   let transcoderReady = false;
+  let audioBufferQueue = [];
 
   const handleTranscript = async (text) => {
     console.log("📝 GPT Response:", text);
     // No TTS path yet — transcript-only mode
   };
 
+  // ✅ Start GPT-4o stream
   startAIStream(
     handleTranscript,
     "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
@@ -63,8 +64,16 @@ wss.on("connection", (ws) => {
     }
   );
 
+  // ✅ Start transcoder and wait until it's ready
   startTranscoder((chunk) => {
     transcoderReady = true;
+
+    // flush any queued audio
+    if (audioBufferQueue.length > 0) {
+      audioBufferQueue.forEach((buf) => pipeToTranscoder(buf));
+      audioBufferQueue = [];
+    }
+
     if (isStreamAlive) sendAudioToAI(chunk);
   });
 
@@ -79,10 +88,12 @@ wss.on("connection", (ws) => {
             console.log("🔗 Captured streamSid:", currentStreamSid);
           }
           const audioBuffer = Buffer.from(data.media.payload, "base64");
+
           if (transcoderReady) {
             pipeToTranscoder(audioBuffer);
           } else {
-            console.warn("⚠️ Audio skipped — transcoder not ready yet");
+            audioBufferQueue.push(audioBuffer);
+            console.log("⚠️ Buffering audio until transcoder is ready");
           }
         }
       } else if (data.event === "stop") {
