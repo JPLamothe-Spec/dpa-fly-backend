@@ -1,77 +1,76 @@
 // openaiTTS.js
+
 const fetch = require("node-fetch");
-const ffmpeg = require("fluent-ffmpeg");
-const ffmpegPath = require("ffmpeg-static");
-const stream = require("stream");
-const { promisify } = require("util");
+const { v4: uuidv4 } = require("uuid");
 
-ffmpeg.setFfmpegPath(ffmpegPath);
-const pipeline = promisify(stream.pipeline);
+// Voice: Breeze is friendly + slightly Aussie
+const VOICE = "echo"; // Options: alloy, echo, fable, onyx, nova, shimmer
+const MODEL = "tts-1"; // Or use "tts-1-hd" for higher fidelity
 
-const synthesizeAndSend = async (text, twilioWs, streamSid) => {
+/**
+ * Synthesizes speech from text using OpenAI's TTS API and sends to Twilio WebSocket
+ * @param {string} text - The text to synthesize
+ * @param {WebSocket} ws - The Twilio media WebSocket
+ */
+async function synthesizeAndSend(text, ws) {
   try {
+    if (!ws || ws.readyState !== 1) {
+      console.warn("⚠️ WebSocket not open – cannot send audio");
+      return;
+    }
+
     console.log("🎤 Synthesizing:", text);
 
-    // Step 1: Call OpenAI TTS API to get MP3
-    const ttsRes = await fetch("https://api.openai.com/v1/audio/speech", {
+    const response = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "tts-1",
-        voice: "nova", // Options: alloy, shimmer, onyx, echo
-        input: text
+        model: MODEL,
+        input: text,
+        voice: VOICE,
+        response_format: "pcm",         // Required for Twilio media
+        speed: 1.0
       })
     });
 
-    if (!ttsRes.ok) throw new Error(`TTS request failed: ${await ttsRes.text()}`);
-    const mp3Stream = ttsRes.body;
-
-    // Step 2: Convert MP3 to mulaw (8kHz) using ffmpeg
-    const mulawChunks = [];
-    const convertStream = ffmpeg(mp3Stream)
-      .audioCodec("pcm_mulaw")
-      .audioFrequency(8000)
-      .format("mulaw")
-      .on("error", (err) => console.error("❌ ffmpeg error:", err))
-      .pipe();
-
-    convertStream.on("data", (chunk) => mulawChunks.push(chunk));
-    await pipeline(convertStream, new stream.Writable({
-      write(chunk, encoding, callback) {
-        callback(); // no-op sink
-      }
-    }));
-
-    const ulawBuffer = Buffer.concat(mulawChunks);
-
-    // Step 3: Send audio to Twilio via WebSocket (with final safety check)
-    if (twilioWs && twilioWs.readyState === 1) {
-      try {
-        twilioWs.send(
-          JSON.stringify({
-            event: "media",
-            streamSid: streamSid,
-            media: {
-              payload: ulawBuffer.toString("base64"),
-              track: "outbound"
-            }
-          })
-        );
-        console.log("📤 TTS audio sent to Twilio ✅");
-      } catch (sendErr) {
-        console.warn("⚠️ Failed to send audio – WebSocket may have closed mid-send:", sendErr.message);
-      }
-    } else {
-      console.warn("⚠️ WebSocket not open – cannot send audio");
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ TTS API error:", errorText);
+      return;
     }
 
-  } catch (err) {
-    console.error("🛑 TTS processing failed:", err);
-  }
-};
+    const reader = response.body.getReader();
+    let audioBuffer = Buffer.alloc(0);
 
-module.exports = synthesizeAndSend;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) audioBuffer = Buffer.concat([audioBuffer, Buffer.from(value)]);
+    }
+
+    if (!audioBuffer.length) {
+      console.warn("⚠️ No audio buffer received");
+      return;
+    }
+
+    const mediaMessage = {
+      event: "media",
+      streamSid: uuidv4(), // Twilio expects a unique streamSid for each audio chunk
+      media: {
+        payload: audioBuffer.toString("base64")
+      }
+    };
+
+    ws.send(JSON.stringify(mediaMessage));
+    console.log("📤 TTS audio sent to Twilio:", text);
+
+  } catch (err) {
+    console.error("❌ TTS error:", err);
+  }
+}
+
+module.exports = { synthesizeAndSend };
 
