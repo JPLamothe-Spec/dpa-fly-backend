@@ -19,12 +19,12 @@ const PORT = process.env.PORT || 3000;
 app.post("/twilio/voice", (req, res) => {
   const twiml = `
     <Response>
-      <Start>
-        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
-      </Start>
-      <Pause length="1"/>
+      <Connect>
+        <Stream url="wss://${req.headers.host}/media-stream" track="both_tracks" />
+      </Connect>
     </Response>
   `;
+
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
   res.send(twiml);
