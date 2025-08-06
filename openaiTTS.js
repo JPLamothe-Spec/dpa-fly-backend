@@ -61,13 +61,6 @@ const synthesizeAndSend = async (text, twilioWs, streamSid) => {
       );
       console.log("📤 TTS audio sent to Twilio ✅");
 
-      // ✅ Cleanly close WebSocket after short delay
-      setTimeout(() => {
-        if (twilioWs.readyState === 1) {
-          console.log("👋 Closing WebSocket after audio flush...");
-          twilioWs.close();
-        }
-      }, 500); // small delay to allow packet to reach Twilio
     } else {
       console.warn("⚠️ WebSocket not open – cannot send audio");
     }
@@ -76,5 +69,7 @@ const synthesizeAndSend = async (text, twilioWs, streamSid) => {
     console.error("🛑 TTS processing failed:", err);
   }
 };
+
 module.exports = synthesizeAndSend;
+
 
