@@ -16,7 +16,9 @@ function startTranscoder(onData) {
     ]
   });
 
-  transcoder.on("data", onData); // ✅ this is the correct stream
+  // ✅ Correct stream
+  transcoder.stdout.on("data", onData);
+
   transcoder.on("error", (err) => {
     console.error("❌ Transcoder error:", err);
   });
