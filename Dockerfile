@@ -1,18 +1,11 @@
-# Use official Node.js LTS image
-FROM node:18
+FROM node:18-slim
 
-# Create app directory
+# Install ffmpeg for prism-media
+RUN apt-get update && apt-get install -y ffmpeg
+
 WORKDIR /app
-
-# Copy package.json and install deps
-COPY package*.json ./
+COPY . .
 RUN npm install
 
-# Copy remaining source
-COPY . .
-
-# Expose port (matches fly.toml PORT)
 EXPOSE 3000
-
-# Start the server
 CMD ["node", "index.js"]
