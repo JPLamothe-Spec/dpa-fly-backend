@@ -15,7 +15,7 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 const PORT = process.env.PORT || 3000;
 
-// ✅ Twilio webhook to start streaming
+// ✅ Twilio webhook to start bi-directional streaming
 app.post("/twilio/voice", (req, res) => {
   const twiml = `
     <Response>
@@ -64,16 +64,22 @@ wss.on("connection", (ws) => {
       const data = JSON.parse(msg);
 
       if (data.event === "media" && data.media?.payload) {
-        if (!currentStreamSid && data.streamSid) {
-          currentStreamSid = data.streamSid;
-          console.log("🔗 Captured streamSid:", currentStreamSid);
+        const track = data.media.track || "inbound";
+
+        // Only process caller's speech
+        if (track === "inbound") {
+          if (!currentStreamSid && data.streamSid) {
+            currentStreamSid = data.streamSid;
+            console.log("🔗 Captured streamSid:", currentStreamSid);
+          }
+
+          const audioBuffer = Buffer.from(data.media.payload, "base64");
+          sendAudioToAI(audioBuffer);
         }
-        const audioBuffer = Buffer.from(data.media.payload, "base64");
-        sendAudioToAI(audioBuffer);
 
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
-        closeAIStream(); // ⛔ No WebSocket close here — handled by TTS module
+        closeAIStream(); // ⛔ Do not close WebSocket here — TTS handles it
       }
 
     } catch (err) {
