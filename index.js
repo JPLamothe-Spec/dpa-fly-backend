@@ -15,23 +15,24 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 const PORT = process.env.PORT || 3000;
 
-// ✅ Twilio webhook to start bi-directional streaming
+// ✅ Twilio webhook to start streaming
 app.post("/twilio/voice", (req, res) => {
-const twiml = `
-  <Response>
-    <Say>Hi, one moment while I connect you.</Say>
-    <Start>
-      <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
-    </Start>
-    <Pause length="3"/>
-  </Response>
-`;
+  const twiml = `
+    <Response>
+      <Say>Hi, one moment while I connect you.</Say>
+      <Start>
+        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+      </Start>
+      <Pause length="5"/>
+    </Response>
+  `;
+
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
   res.send(twiml);
 });
 
-// ✅ HTTP Server + WebSocket handler
+// ✅ Create HTTP server and WebSocket server
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 
@@ -45,7 +46,6 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-// ✅ WebSocket connection from Twilio media stream
 wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established");
 
@@ -80,7 +80,7 @@ wss.on("connection", (ws) => {
 
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
-        closeAIStream(); // ⛔ Do not close WebSocket here — TTS handles it
+        closeAIStream(); // Let TTS manage ws.close()
       }
 
     } catch (err) {
@@ -99,10 +99,10 @@ wss.on("connection", (ws) => {
   });
 });
 
-// ✅ Health check route for Fly.io
+// ✅ Health check route
 app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 
-// ✅ Start HTTP server
+// ✅ Start the server
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
