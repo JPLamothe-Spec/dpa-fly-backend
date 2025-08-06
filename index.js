@@ -52,27 +52,27 @@ wss.on("connection", (ws) => {
 
   const handleTranscript = async (text) => {
     console.log("📝 GPT Response:", text);
-    // No TTS path yet — transcript-only mode
+    // No TTS yet — transcript-only
   };
-
-  // ✅ Start GPT-4o stream
-  startAIStream(
-    handleTranscript,
-    "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
-    () => {
-      console.log("🧠 GPT-4o text stream ready");
-    }
-  );
 
   // ✅ Start transcoder and wait until it's ready
   startTranscoder((chunk) => {
     transcoderReady = true;
 
-    // flush any queued audio
+    // Flush any buffered audio
     if (audioBufferQueue.length > 0) {
       audioBufferQueue.forEach((buf) => pipeToTranscoder(buf));
       audioBufferQueue = [];
     }
+
+    // ✅ Start GPT stream *after* transcoder is ready
+    startAIStream(
+      handleTranscript,
+      "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
+      () => {
+        console.log("🧠 GPT-4o text stream ready");
+      }
+    );
 
     if (isStreamAlive) sendAudioToAI(chunk);
   });
