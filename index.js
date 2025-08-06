@@ -4,12 +4,12 @@ const http = require("http");
 const WebSocket = require("ws");
 const { startTranscoder, pipeToTranscoder } = require("./transcoder");
 const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
+const synthesizeAndSend = require("./openaiTTS");
 require("dotenv").config();
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
-
 const PORT = process.env.PORT || 3000;
 
 app.post("/twilio/voice", (req, res) => {
@@ -38,21 +38,33 @@ wss.on("connection", (ws) => {
 
   let isStreamAlive = true;
   let transcoderReady = false;
+  let streamSid = null;
 
-  // Start GPT stream first
-  startAIStream({
-    onTranscript: (text) => {
-      console.log("📝 Transcript:", text);
-    },
-    onClose: () => {
-      ws.close();
-    },
-    onReady: () => {
-      console.log("🧠 GPT-4o stream ready");
+  let transcriptBuffer = "";
+
+  // 🔊 Handle GPT response
+  const handleTranscript = async (text) => {
+    console.log("📝 Transcript:", text);
+    transcriptBuffer += text;
+
+    // Speak after a full sentence or thought
+    if (/[.!?]\s*$/.test(transcriptBuffer)) {
+      const finalSentence = transcriptBuffer.trim();
+      transcriptBuffer = "";
+      if (ws.readyState === 1 && streamSid) {
+        await synthesizeAndSend(finalSentence, ws, streamSid);
+      }
     }
+  };
+
+  // 🔁 Transcoder after GPT stream ready
+  startAIStream({
+    onTranscript: handleTranscript,
+    onClose: () => ws.close(),
+    onReady: () => console.log("🧠 GPT-4o stream ready")
   });
 
-  // Then start transcoder with slight delay for safety
+  // 🔁 Delay FFmpeg startup slightly
   setTimeout(() => {
     startTranscoder((chunk) => {
       if (!transcoderReady) {
@@ -61,13 +73,15 @@ wss.on("connection", (ws) => {
       }
       if (isStreamAlive) sendAudioToAI(chunk);
     });
-  }, 100); // 100ms buffer
-  
+  }, 100);
 
+  // 📡 Handle Twilio media stream
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
+
     if (data.event === "start") {
-      console.log("🔗 Captured streamSid:", data.start.streamSid);
+      streamSid = data.start.streamSid;
+      console.log("🔗 Captured streamSid:", streamSid);
     } else if (data.event === "media") {
       if (transcoderReady) {
         const audio = Buffer.from(data.media.payload, "base64");
@@ -95,11 +109,8 @@ wss.on("connection", (ws) => {
 
 app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 
-// ✅ Listen with graceful port collision handling
 server.listen(PORT)
-  .on("listening", () => {
-    console.log(`🚀 Server listening on port ${PORT}`);
-  })
+  .on("listening", () => console.log(`🚀 Server listening on port ${PORT}`))
   .on("error", (err) => {
     if (err.code === "EADDRINUSE") {
       console.error("❌ Port already in use. Exiting...");
