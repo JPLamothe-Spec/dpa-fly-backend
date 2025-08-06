@@ -1,7 +1,6 @@
 const prism = require("prism-media");
 
 let transcoder = null;
-let outputStream = null; // ✅ Needed for outputStream reference below
 
 function startTranscoder(onData) {
   transcoder = new prism.FFmpeg({
@@ -17,11 +16,8 @@ function startTranscoder(onData) {
     ]
   });
 
-  outputStream = transcoder.stdout;
-
-  outputStream.on("data", onData);
-
-  outputStream.on("error", (err) => {
+  transcoder.on("data", onData); // ✅ this is the correct stream
+  transcoder.on("error", (err) => {
     console.error("❌ Transcoder error:", err);
   });
 }
