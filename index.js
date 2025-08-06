@@ -17,13 +17,14 @@ const PORT = process.env.PORT || 3000;
 
 // ✅ Twilio webhook to start bi-directional streaming
 app.post("/twilio/voice", (req, res) => {
-  const twiml = `
-    <Response>
-      <Connect>
-        <Stream url="wss://${req.headers.host}/media-stream" track="both_tracks" />
-      </Connect>
-    </Response>
-  `;
+const twiml = `
+  <Response>
+    <Start>
+      <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+    </Start>
+    <Pause length="1"/>
+  </Response>
+`;
 
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
