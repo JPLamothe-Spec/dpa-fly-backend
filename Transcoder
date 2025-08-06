@@ -1,51 +1,114 @@
-// transcoder.js
-const ffmpeg = require("fluent-ffmpeg");
-const ffmpegPath = require("ffmpeg-static");
-const { PassThrough } = require("stream");
+// index.js
+const express = require("express");
+const http = require("http");
+const WebSocket = require("ws");
+const bodyParser = require("body-parser");
+require("dotenv").config();
 
-ffmpeg.setFfmpegPath(ffmpegPath);
+const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
+const { startTranscoder, pipeToTranscoder, stopTranscoder } = require("./transcoder");
 
-let ffmpegProcess;
-let inputStream;
+const app = express();
+app.use(bodyParser.urlencoded({ extended: false }));
+const PORT = process.env.PORT || 3000;
 
-function startTranscoder(onChunk) {
-  inputStream = new PassThrough();
+// ✅ Twilio webhook to start streaming
+app.post("/twilio/voice", (req, res) => {
+  const twiml = `
+    <Response>
+      <Start>
+        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+      </Start>
+      <Pause length="30"/>
+    </Response>
+  `;
 
-  ffmpegProcess = ffmpeg(inputStream)
-    .inputFormat("mulaw")
-    .audioFrequency(8000)
-    .audioCodec("pcm_s16le")
-    .audioChannels(1)
-    .format("s16le")
-    .on("error", (err) => {
-      console.error("❌ ffmpeg error:", err);
-    })
-    .on("start", () => {
-      console.log("🎙️ ffmpeg transcoder started");
-    })
-    .pipe();
+  res.set("Content-Type", "text/xml");
+  res.set("Content-Length", Buffer.byteLength(twiml));
+  res.send(twiml);
+});
 
-  ffmpegProcess.on("data", onChunk);
-}
+// ✅ HTTP Server + WebSocket handler
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ noServer: true });
 
-function pipeToTranscoder(buffer) {
-  if (inputStream && !inputStream.destroyed) {
-    inputStream.write(buffer);
+server.on("upgrade", (req, socket, head) => {
+  if (req.url === "/media-stream") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  } else {
+    socket.destroy();
   }
-}
+});
 
-function stopTranscoder() {
-  if (inputStream && !inputStream.destroyed) {
-    inputStream.end();
-  }
-  if (ffmpegProcess && ffmpegProcess.destroy) {
-    ffmpegProcess.destroy();
-    console.log("🛑 ffmpeg transcoder stopped");
-  }
-}
+// ✅ WebSocket connection from Twilio media stream
+wss.on("connection", (ws) => {
+  console.log("✅ WebSocket connection established");
 
-module.exports = {
-  startTranscoder,
-  pipeToTranscoder,
-  stopTranscoder,
-};
+  let currentStreamSid = null;
+  let isStreamAlive = true;
+
+  const handleTranscript = async (text) => {
+    console.log("📝 GPT Response:", text);
+    // No TTS path yet — transcript-only mode
+  };
+
+  startAIStream(
+    handleTranscript,
+    "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
+    () => {
+      console.log("🧠 GPT-4o text stream ready");
+    }
+  );
+
+  startTranscoder((chunk) => {
+    if (isStreamAlive) sendAudioToAI(chunk);
+  });
+
+  ws.on("message", (msg) => {
+    try {
+      const data = JSON.parse(msg);
+      if (data.event === "media" && data.media?.payload) {
+        const track = data.media.track || "inbound";
+        if (track === "inbound") {
+          if (!currentStreamSid && data.streamSid) {
+            currentStreamSid = data.streamSid;
+            console.log("🔗 Captured streamSid:", currentStreamSid);
+          }
+          const audioBuffer = Buffer.from(data.media.payload, "base64");
+          pipeToTranscoder(audioBuffer);
+        }
+      } else if (data.event === "stop") {
+        console.log("⛔ Twilio stream stopped");
+        isStreamAlive = false;
+        stopTranscoder();
+        closeAIStream();
+      }
+    } catch (err) {
+      console.error("❌ WebSocket message error:", err);
+    }
+  });
+
+  ws.on("close", () => {
+    console.log("❌ WebSocket connection closed");
+    isStreamAlive = false;
+    stopTranscoder();
+    closeAIStream();
+  });
+
+  ws.on("error", (err) => {
+    console.error("⚠️ WebSocket error:", err);
+    isStreamAlive = false;
+    stopTranscoder();
+    closeAIStream();
+  });
+});
+
+// ✅ Health check route
+app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
+
+// ✅ Start server
+server.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
