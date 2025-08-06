@@ -4,7 +4,7 @@ const http = require("http");
 const WebSocket = require("ws");
 const { startTranscoder, pipeToTranscoder } = require("./transcoder");
 const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
-const synthesizeAndSend = require("./openaiTTS");
+const { synthesizeAndSend } = require("./openaiTTS");
 require("dotenv").config();
 
 const app = express();
@@ -52,6 +52,7 @@ wss.on("connection", (ws) => {
       const finalSentence = transcriptBuffer.trim();
       transcriptBuffer = "";
       if (ws.readyState === 1 && streamSid) {
+        console.log("📣 Calling synthesizeAndSend:", finalSentence);
         await synthesizeAndSend(finalSentence, ws, streamSid);
       }
     }
