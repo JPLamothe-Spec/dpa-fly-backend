@@ -14,14 +14,15 @@ const PORT = process.env.PORT || 3000;
 
 // ✅ Twilio webhook to start streaming
 app.post("/twilio/voice", (req, res) => {
-  const twiml = `
+  const twiml = 
     <Response>
       <Start>
         <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
       </Start>
       <Pause length="30"/>
     </Response>
-  `;
+  ;
+
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
   res.send(twiml);
@@ -48,32 +49,22 @@ wss.on("connection", (ws) => {
   let currentStreamSid = null;
   let isStreamAlive = true;
   let transcoderReady = false;
-  let audioBufferQueue = [];
 
   const handleTranscript = async (text) => {
     console.log("📝 GPT Response:", text);
-    // No TTS yet — transcript-only
+    // No TTS path yet — transcript-only mode
   };
 
-  // ✅ Start transcoder and wait until it's ready
+  startAIStream(
+    handleTranscript,
+    "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
+    () => {
+      console.log("🧠 GPT-4o text stream ready");
+    }
+  );
+
   startTranscoder((chunk) => {
     transcoderReady = true;
-
-    // Flush any buffered audio
-    if (audioBufferQueue.length > 0) {
-      audioBufferQueue.forEach((buf) => pipeToTranscoder(buf));
-      audioBufferQueue = [];
-    }
-
-    // ✅ Start GPT stream *after* transcoder is ready
-    startAIStream(
-      handleTranscript,
-      "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
-      () => {
-        console.log("🧠 GPT-4o text stream ready");
-      }
-    );
-
     if (isStreamAlive) sendAudioToAI(chunk);
   });
 
@@ -88,12 +79,10 @@ wss.on("connection", (ws) => {
             console.log("🔗 Captured streamSid:", currentStreamSid);
           }
           const audioBuffer = Buffer.from(data.media.payload, "base64");
-
           if (transcoderReady) {
             pipeToTranscoder(audioBuffer);
           } else {
-            audioBufferQueue.push(audioBuffer);
-            console.log("⚠️ Buffering audio until transcoder is ready");
+            console.warn("⚠️ Audio skipped — transcoder not ready yet");
           }
         }
       } else if (data.event === "stop") {
@@ -124,5 +113,5 @@ app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 
 // ✅ Start server
 server.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
+  console.log(🚀 Server listening on port ${PORT});
 });
