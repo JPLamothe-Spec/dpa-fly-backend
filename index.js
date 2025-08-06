@@ -73,11 +73,17 @@ wss.on("connection", (ws) => {
         const audioBuffer = Buffer.from(data.media.payload, "base64");
         sendAudioToAI(audioBuffer);
 
-      } else if (data.event === "stop") {
-        console.log("⛔ Twilio stream stopped");
-        closeAIStream();
-        ws.close();
-      }
+} else if (data.event === "stop") {
+  console.log("⛔ Twilio stream stopped");
+  closeAIStream();
+
+  // 🕓 Delay close to allow audio to flush
+  setTimeout(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+  }, 2000); // 2s buffer – you can fine-tune this
+}
 
     } catch (err) {
       console.error("❌ WebSocket message error:", err);
