@@ -18,14 +18,14 @@ const PORT = process.env.PORT || 3000;
 
 // ✅ Twilio webhook to start streaming
 app.post("/twilio/voice", (req, res) => {
-const twiml = `
-  <Response>
-    <Start>
-      <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
-    </Start>
-    <Pause length="30"/>
-  </Response>
-`;
+  const twiml = `
+    <Response>
+      <Start>
+        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+      </Start>
+      <Pause length="30"/>
+    </Response>
+  `;
 
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
@@ -51,10 +51,17 @@ wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established");
 
   let currentStreamSid = null;
+  let isStreamAlive = true;
 
-  const handleTranscript = (text) => {
+  const handleTranscript = async (text) => {
     console.log("📝 GPT Response:", text);
-    synthesizeAndSend(text, ws, currentStreamSid);
+    if (isStreamAlive) {
+      try {
+        await synthesizeAndSend(text, ws, currentStreamSid);
+      } catch (err) {
+        console.error("⚠️ Failed to synthesize/send TTS:", err);
+      }
+    }
   };
 
   startAIStream(
@@ -71,22 +78,19 @@ wss.on("connection", (ws) => {
 
       if (data.event === "media" && data.media?.payload) {
         const track = data.media.track || "inbound";
-
         if (track === "inbound") {
           if (!currentStreamSid && data.streamSid) {
             currentStreamSid = data.streamSid;
             console.log("🔗 Captured streamSid:", currentStreamSid);
           }
-
           const audioBuffer = Buffer.from(data.media.payload, "base64");
           sendAudioToAI(audioBuffer);
         }
-
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
-        closeAIStream(); // Let TTS manage the WebSocket cleanup
+        isStreamAlive = false;
+        closeAIStream();
       }
-
     } catch (err) {
       console.error("❌ WebSocket message error:", err);
     }
@@ -94,11 +98,13 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     console.log("❌ WebSocket connection closed");
+    isStreamAlive = false;
     closeAIStream();
   });
 
   ws.on("error", (err) => {
     console.error("⚠️ WebSocket error:", err);
+    isStreamAlive = false;
     closeAIStream();
   });
 });
