@@ -76,4 +76,5 @@ const synthesizeAndSend = async (text, twilioWs, streamSid) => {
     console.error("🛑 TTS processing failed:", err);
   }
 };
+module.exports = synthesizeAndSend;
 
