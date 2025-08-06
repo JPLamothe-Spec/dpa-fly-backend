@@ -1,8 +1,7 @@
 // transcoder.js
-const prism = require("prism-media");
-
 let transcoder = null;
 let outputStream = null;
+let ready = false;
 
 function startTranscoder(onData) {
   transcoder = new prism.FFmpeg({
@@ -23,10 +22,16 @@ function startTranscoder(onData) {
   outputStream.on("error", (err) => {
     console.error("❌ Transcoder error:", err);
   });
+
+  // ✅ Set ready when FFmpeg is fully initialized
+  transcoder.once("spawn", () => {
+    console.log("🎙️ Transcoder ready");
+    ready = true;
+  });
 }
 
 function pipeToTranscoder(buffer) {
-  if (transcoder?.stdin?.writable) {
+  if (ready && transcoder?.stdin?.writable) {
     transcoder.stdin.write(buffer);
   } else {
     console.warn("⚠️ Transcoder not ready or stdin not writable");
