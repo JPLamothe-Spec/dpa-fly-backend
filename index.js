@@ -6,7 +6,7 @@ const bodyParser = require("body-parser");
 require("dotenv").config();
 
 const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
-const { startTranscoder, stopTranscoder, pipeToTranscoder } = require("./transcoder");
+const { startTranscoder, pipeToTranscoder } = require("./transcoder");
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -82,7 +82,6 @@ wss.on("connection", (ws) => {
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
         isStreamAlive = false;
-        stopTranscoder();
         closeAIStream();
       }
     } catch (err) {
@@ -93,14 +92,12 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     console.log("❌ WebSocket connection closed");
     isStreamAlive = false;
-    stopTranscoder();
     closeAIStream();
   });
 
   ws.on("error", (err) => {
     console.error("⚠️ WebSocket error:", err);
     isStreamAlive = false;
-    stopTranscoder();
     closeAIStream();
   });
 });
