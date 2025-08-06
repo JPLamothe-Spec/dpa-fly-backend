@@ -62,11 +62,11 @@ wss.on("connection", (ws) => {
   );
 
 setTimeout(() => {
+  transcoderReady = true;
   startTranscoder((chunk) => {
-    transcoderReady = true;
     if (isStreamAlive) sendAudioToAI(chunk);
   });
-}, 100); // Delay FFmpeg start just enough
+}, 100);
 
   ws.on("message", (msg) => {
     try {
