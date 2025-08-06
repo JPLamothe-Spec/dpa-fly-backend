@@ -52,8 +52,6 @@ wss.on("connection", (ws) => {
 
   let currentStreamSid = null;
   let isStreamAlive = true;
-  let lastAudioTimestamp = Date.now();
-  let fillerInterval;
 
   const handleTranscript = async (text) => {
     console.log("📝 GPT Response:", text);
@@ -71,20 +69,15 @@ wss.on("connection", (ws) => {
     "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
     () => {
       console.log("🧠 GPT-4o text stream ready");
-      // ✅ Send dummy audio to prevent OpenAI idle timeout
       const silence = Buffer.alloc(320); // 20ms of silence at 8kHz mulaw
       sendAudioToAI(silence);
-
-      // 🔁 Start filler token interval
-      fillerInterval = setInterval(() => {
-        const now = Date.now();
-        if (now - lastAudioTimestamp > 4000) {
-          console.log("⚙️ Sending filler token to keep GPT-4o alive...");
-          handleTranscript("...");
-        }
-      }, 3000);
     }
   );
+
+  const ffmpeg = require("fluent-ffmpeg");
+  const ffmpegPath = require("ffmpeg-static");
+  ffmpeg.setFfmpegPath(ffmpegPath);
+  const { PassThrough } = require("stream");
 
   ws.on("message", (msg) => {
     try {
@@ -97,14 +90,32 @@ wss.on("connection", (ws) => {
             currentStreamSid = data.streamSid;
             console.log("🔗 Captured streamSid:", currentStreamSid);
           }
-          const audioBuffer = Buffer.from(data.media.payload, "base64");
-          lastAudioTimestamp = Date.now();
-          sendAudioToAI(audioBuffer);
+
+          const ulawBuffer = Buffer.from(data.media.payload, "base64");
+
+          const input = new PassThrough();
+          input.end(ulawBuffer);
+
+          const convert = ffmpeg(input)
+            .audioCodec("pcm_s16le")
+            .audioFrequency(16000)
+            .audioChannels(1)
+            .format("s16le")
+            .on("error", (err) => {
+              console.error("❌ ffmpeg error:", err);
+            })
+            .pipe();
+
+          const pcmChunks = [];
+          convert.on("data", (chunk) => pcmChunks.push(chunk));
+          convert.on("end", () => {
+            const pcmBuffer = Buffer.concat(pcmChunks);
+            sendAudioToAI(pcmBuffer);
+          });
         }
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
         isStreamAlive = false;
-        clearInterval(fillerInterval);
         closeAIStream();
       }
     } catch (err) {
@@ -115,14 +126,12 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     console.log("❌ WebSocket connection closed");
     isStreamAlive = false;
-    clearInterval(fillerInterval);
     closeAIStream();
   });
 
   ws.on("error", (err) => {
     console.error("⚠️ WebSocket error:", err);
     isStreamAlive = false;
-    clearInterval(fillerInterval);
     closeAIStream();
   });
 });
