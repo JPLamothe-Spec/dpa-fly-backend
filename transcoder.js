@@ -10,21 +10,15 @@ function startTranscoder(onData) {
       "-ar", "8000",
       "-ac", "1",
       "-i", "pipe:0",
-      "-probesize", "32",
-      "-analyzeduration", "0",
-      "-af", "loudnorm",
-      "-f", "flac",
+      "-f", "s16le",
       "-ar", "16000",
       "-ac", "1",
       "pipe:1"
     ]
   });
 
-  if (transcoder.stdout) {
-    transcoder.stdout.on("data", onData);
-  } else {
-    console.warn("⚠️ Transcoder stdout is not available");
-  }
+  // ✅ Correct: FFmpeg stream itself emits 'data'
+  transcoder.on("data", onData);
 
   transcoder.on("error", (err) => {
     console.error("❌ Transcoder error:", err);
