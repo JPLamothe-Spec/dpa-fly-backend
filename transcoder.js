@@ -1,32 +1,33 @@
-const { spawn } = require("child_process");
+// transcoder.js
+const prism = require("prism-media");
 
 let transcoder = null;
 
 function startTranscoder(onData) {
-  transcoder = spawn("ffmpeg", [
-    "-f", "mulaw",
-    "-ar", "8000",
-    "-ac", "1",
-    "-i", "pipe:0",
-    "-f", "s16le",
-    "-ar", "16000",
-    "-ac", "1",
-    "pipe:1"
-  ]);
-
-  transcoder.stdout.on("data", onData);
-
-  transcoder.stderr.on("data", (data) => {
-    // Optional: show FFmpeg debug logs
-    console.error(`🔧 FFmpeg stderr: ${data}`);
+  transcoder = new prism.FFmpeg({
+    args: [
+      "-f", "mulaw",
+      "-ar", "8000",
+      "-ac", "1",
+      "-i", "pipe:0",
+      "-probesize", "32",
+      "-analyzeduration", "0",
+      "-af", "loudnorm",
+      "-f", "flac",
+      "-ar", "16000",
+      "-ac", "1",
+      "pipe:1"
+    ]
   });
+
+  if (transcoder.stdout) {
+    transcoder.stdout.on("data", onData);
+  } else {
+    console.warn("⚠️ Transcoder stdout is not available");
+  }
 
   transcoder.on("error", (err) => {
     console.error("❌ Transcoder error:", err);
-  });
-
-  transcoder.on("close", (code) => {
-    console.log(`❌ Transcoder closed with code ${code}`);
   });
 }
 
