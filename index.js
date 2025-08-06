@@ -1,4 +1,3 @@
-// index.js
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
@@ -14,15 +13,14 @@ const PORT = process.env.PORT || 3000;
 
 // ✅ Twilio webhook to start streaming
 app.post("/twilio/voice", (req, res) => {
-  const twiml = 
+  const twiml = `
     <Response>
       <Start>
         <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
       </Start>
       <Pause length="30"/>
     </Response>
-  ;
-
+  `;
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
   res.send(twiml);
@@ -113,5 +111,5 @@ app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 
 // ✅ Start server
 server.listen(PORT, () => {
-  console.log(🚀 Server listening on port ${PORT});
+  console.log(`🚀 Server listening on port ${PORT}`);
 });
