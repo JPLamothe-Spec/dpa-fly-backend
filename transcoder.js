@@ -1,4 +1,3 @@
-// transcoder.js
 const prism = require("prism-media");
 
 let transcoder = null;
@@ -6,19 +5,19 @@ let transcoder = null;
 function startTranscoder(onData) {
   transcoder = new prism.FFmpeg({
     args: [
-      "-f", "mulaw",
-      "-ar", "8000",
-      "-ac", "1",
-      "-i", "pipe:0",
-      "-f", "s16le",
-      "-ar", "16000",
-      "-ac", "1",
-      "pipe:1"
+      "-f", "mulaw",      // Twilio input format
+      "-ar", "8000",      // 8kHz sample rate
+      "-ac", "1",         // mono
+      "-i", "pipe:0",     // input from stdin
+      "-f", "s16le",      // raw PCM output
+      "-ar", "16000",     // upsample to 16kHz
+      "-ac", "1",         // mono
+      "pipe:1"            // output to stdout
     ]
   });
 
-  // ✅ Listen directly on the transcoder stream
-  transcoder.on("data", onData);
+  // ✅ THIS is the fix — required to receive audio
+  transcoder.stdout.on("data", onData);
 
   transcoder.on("error", (err) => {
     console.error("❌ Transcoder error:", err);
