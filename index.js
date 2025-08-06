@@ -69,6 +69,9 @@ wss.on("connection", (ws) => {
     "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
     () => {
       console.log("🧠 GPT-4o text stream ready");
+      // ✅ Send dummy audio to prevent OpenAI idle timeout
+      const silence = Buffer.alloc(320); // 20ms of silence at 8kHz mulaw
+      sendAudioToAI(silence);
     }
   );
 
