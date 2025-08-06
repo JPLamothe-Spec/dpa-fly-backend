@@ -21,7 +21,7 @@ const synthesizeAndSend = async (text, twilioWs, streamSid) => {
       },
       body: JSON.stringify({
         model: "tts-1",
-        voice: "nova", // Other options: alloy, shimmer, onyx, echo
+        voice: "nova", // Or alloy, shimmer, onyx, echo
         input: text
       })
     });
@@ -41,8 +41,7 @@ const synthesizeAndSend = async (text, twilioWs, streamSid) => {
     convertStream.on("data", (chunk) => mulawChunks.push(chunk));
     await pipeline(convertStream, new stream.Writable({
       write(chunk, encoding, callback) {
-        // No-op, chunks are collected in array above
-        callback();
+        callback(); // no-op sink
       }
     }));
 
@@ -61,6 +60,14 @@ const synthesizeAndSend = async (text, twilioWs, streamSid) => {
         })
       );
       console.log("📤 TTS audio sent to Twilio ✅");
+
+      // ✅ Cleanly close WebSocket after short delay
+      setTimeout(() => {
+        if (twilioWs.readyState === 1) {
+          console.log("👋 Closing WebSocket after audio flush...");
+          twilioWs.close();
+        }
+      }, 500); // small delay to allow packet to reach Twilio
     } else {
       console.warn("⚠️ WebSocket not open – cannot send audio");
     }
@@ -70,4 +77,3 @@ const synthesizeAndSend = async (text, twilioWs, streamSid) => {
   }
 };
 
-module.exports = synthesizeAndSend;
