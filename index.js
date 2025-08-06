@@ -39,6 +39,16 @@ wss.on("connection", (ws) => {
   let isStreamAlive = true;
   let transcoderReady = false;
 
+  // 🔁 First start transcoder
+  startTranscoder((chunk) => {
+    if (!transcoderReady) {
+      transcoderReady = true;
+      console.log("🎙️ Transcoder is now ready");
+    }
+    if (isStreamAlive) sendAudioToAI(chunk);
+  });
+
+  // 🧠 Then start GPT stream
   startAIStream({
     onTranscript: (text) => {
       console.log("📝 Transcript:", text);
@@ -47,17 +57,6 @@ wss.on("connection", (ws) => {
       ws.close();
     },
   });
-
-  // Delay to give FFmpeg time to start up
-  setTimeout(() => {
-    startTranscoder((chunk) => {
-      if (!transcoderReady) {
-        transcoderReady = true;
-        console.log("🎙️ Transcoder is now ready");
-      }
-      if (isStreamAlive) sendAudioToAI(chunk);
-    });
-  }, 100); // 100ms startup buffer
 
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
