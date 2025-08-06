@@ -1,4 +1,3 @@
-// transcoder.js
 const prism = require("prism-media");
 
 let transcoder = null;
@@ -17,8 +16,11 @@ function startTranscoder(onData) {
     ]
   });
 
-  // ✅ Correct: FFmpeg stream itself emits 'data'
-  transcoder.on("data", onData);
+  // ✅ Only listen when stdout becomes available
+  transcoder.once("spawn", () => {
+    console.log("🎙️ FFmpeg spawned and ready");
+    transcoder.stdout.on("data", onData);
+  });
 
   transcoder.on("error", (err) => {
     console.error("❌ Transcoder error:", err);
