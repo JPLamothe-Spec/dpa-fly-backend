@@ -48,13 +48,16 @@ wss.on("connection", (ws) => {
     },
   });
 
-  startTranscoder((chunk) => {
-    if (!transcoderReady) {
-      transcoderReady = true;
-      console.log("🎙️ Transcoder is now ready");
-    }
-    if (isStreamAlive) sendAudioToAI(chunk);
-  });
+  // Delay to give FFmpeg time to start up
+  setTimeout(() => {
+    startTranscoder((chunk) => {
+      if (!transcoderReady) {
+        transcoderReady = true;
+        console.log("🎙️ Transcoder is now ready");
+      }
+      if (isStreamAlive) sendAudioToAI(chunk);
+    });
+  }, 100); // 100ms startup buffer
 
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
