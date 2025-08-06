@@ -18,14 +18,14 @@ const PORT = process.env.PORT || 3000;
 
 // ✅ Twilio webhook to start streaming
 app.post("/twilio/voice", (req, res) => {
-  const twiml = `
-    <Response>
-      <Say>Hi, one moment while I connect you to my assistant.</Say>
-      <Start>
-        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
-      </Start>
-    </Response>
-  `;
+const twiml = `
+  <Response>
+    <Start>
+      <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+    </Start>
+    <Pause length="30"/>
+  </Response>
+`;
 
   res.set("Content-Type", "text/xml");
   res.set("Content-Length", Buffer.byteLength(twiml));
