@@ -1,3 +1,4 @@
+// index.js
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
@@ -19,11 +20,10 @@ const PORT = process.env.PORT || 3000;
 app.post("/twilio/voice", (req, res) => {
   const twiml = `
     <Response>
-      <Say>Hi, one moment while I connect you.</Say>
+      <Say>Hi, one moment while I connect you to my assistant.</Say>
       <Start>
         <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
       </Start>
-      <Pause length="5"/>
     </Response>
   `;
 
@@ -32,7 +32,7 @@ app.post("/twilio/voice", (req, res) => {
   res.send(twiml);
 });
 
-// ✅ Create HTTP server and WebSocket server
+// ✅ HTTP Server + WebSocket handler
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 
@@ -46,6 +46,7 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
+// ✅ WebSocket connection from Twilio media stream
 wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established");
 
@@ -67,7 +68,6 @@ wss.on("connection", (ws) => {
       if (data.event === "media" && data.media?.payload) {
         const track = data.media.track || "inbound";
 
-        // Only process caller's speech
         if (track === "inbound") {
           if (!currentStreamSid && data.streamSid) {
             currentStreamSid = data.streamSid;
@@ -80,7 +80,7 @@ wss.on("connection", (ws) => {
 
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
-        closeAIStream(); // Let TTS manage ws.close()
+        closeAIStream(); // Let TTS manage the WebSocket cleanup
       }
 
     } catch (err) {
@@ -102,7 +102,7 @@ wss.on("connection", (ws) => {
 // ✅ Health check route
 app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 
-// ✅ Start the server
+// ✅ Start server
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
