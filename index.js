@@ -52,7 +52,8 @@ wss.on("connection", (ws) => {
 
   let currentStreamSid = null;
   let isStreamAlive = true;
-  let keepaliveInterval = null;
+  let lastAudioTimestamp = Date.now();
+  let fillerInterval;
 
   const handleTranscript = async (text) => {
     console.log("📝 GPT Response:", text);
@@ -70,12 +71,18 @@ wss.on("connection", (ws) => {
     "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
     () => {
       console.log("🧠 GPT-4o text stream ready");
+      // ✅ Send dummy audio to prevent OpenAI idle timeout
       const silence = Buffer.alloc(320); // 20ms of silence at 8kHz mulaw
       sendAudioToAI(silence);
-      // 🔁 Keepalive every 5s to prevent GPT-4o timeout
-      keepaliveInterval = setInterval(() => {
-        if (isStreamAlive) sendAudioToAI(silence);
-      }, 5000);
+
+      // 🔁 Start filler token interval
+      fillerInterval = setInterval(() => {
+        const now = Date.now();
+        if (now - lastAudioTimestamp > 4000) {
+          console.log("⚙️ Sending filler token to keep GPT-4o alive...");
+          handleTranscript("...");
+        }
+      }, 3000);
     }
   );
 
@@ -91,12 +98,13 @@ wss.on("connection", (ws) => {
             console.log("🔗 Captured streamSid:", currentStreamSid);
           }
           const audioBuffer = Buffer.from(data.media.payload, "base64");
+          lastAudioTimestamp = Date.now();
           sendAudioToAI(audioBuffer);
         }
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
         isStreamAlive = false;
-        clearInterval(keepaliveInterval);
+        clearInterval(fillerInterval);
         closeAIStream();
       }
     } catch (err) {
@@ -107,14 +115,14 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     console.log("❌ WebSocket connection closed");
     isStreamAlive = false;
-    clearInterval(keepaliveInterval);
+    clearInterval(fillerInterval);
     closeAIStream();
   });
 
   ws.on("error", (err) => {
     console.error("⚠️ WebSocket error:", err);
     isStreamAlive = false;
-    clearInterval(keepaliveInterval);
+    clearInterval(fillerInterval);
     closeAIStream();
   });
 });
