@@ -57,9 +57,13 @@ wss.on("connection", (ws) => {
     synthesizeAndSend(text, ws, currentStreamSid);
   };
 
-  startAIStream(handleTranscript, null, () => {
-    console.log("🧠 GPT-4o text stream ready");
-  });
+  startAIStream(
+    handleTranscript,
+    "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
+    () => {
+      console.log("🧠 GPT-4o text stream ready");
+    }
+  );
 
   ws.on("message", (msg) => {
     try {
