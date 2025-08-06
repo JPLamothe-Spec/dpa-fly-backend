@@ -4,7 +4,7 @@ const http = require("http");
 const WebSocket = require("ws");
 const { startTranscoder, pipeToTranscoder } = require("./transcoder");
 const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
-const { synthesizeAndSend } = require("./openaiTTS");
+const { synthesizeAndSend } = require("./openaiTTS"); // ✅ fixed import
 require("dotenv").config();
 
 const app = express();
@@ -39,7 +39,6 @@ wss.on("connection", (ws) => {
   let isStreamAlive = true;
   let transcoderReady = false;
   let streamSid = null;
-
   let transcriptBuffer = "";
 
   // 🔊 Handle GPT response
@@ -47,22 +46,21 @@ wss.on("connection", (ws) => {
     console.log("📝 Transcript:", text);
     transcriptBuffer += text;
 
-    // Speak after a full sentence or thought
     if (/[.!?]\s*$/.test(transcriptBuffer)) {
       const finalSentence = transcriptBuffer.trim();
       transcriptBuffer = "";
+
       if (ws.readyState === 1 && streamSid) {
-        console.log("📣 Calling synthesizeAndSend:", finalSentence);
+        console.log("📣 Calling synthesizeAndSend:", finalSentence); // ✅ Debug line
         await synthesizeAndSend(finalSentence, ws, streamSid);
       }
     }
   };
 
-  // 🔁 Transcoder after GPT stream ready
   startAIStream({
     onTranscript: handleTranscript,
     onClose: () => ws.close(),
-    onReady: () => console.log("🧠 GPT-4o stream ready")
+    onReady: () => console.log("🧠 GPT-4o stream ready"),
   });
 
   // 🔁 Delay FFmpeg startup slightly
