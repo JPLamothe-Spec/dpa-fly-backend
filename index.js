@@ -22,7 +22,7 @@ const twiml = `
     <Start>
       <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
     </Start>
-    <Pause length="1"/>
+    <Pause length="2"/>
   </Response>
 `;
 
