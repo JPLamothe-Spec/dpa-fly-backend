@@ -1,100 +1,96 @@
-// openaiStream.js
-
-const https = require("https");
-const { v4: uuidv4 } = require("uuid");
-
+// index.js
+const express = require("express");
+const http = require("http");
+const WebSocket = require("ws");
+const { startTranscoder, pipeToTranscoder } = require("./transcoder");
+const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
 require("dotenv").config();
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-let openaiRequest;
-let partialBuffer = "";
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ noServer: true });
 
-function startAIStream(onTranscript, onAudio, onReady) {
-  const sessionId = uuidv4();
+const PORT = process.env.PORT || 3000;
 
-  const requestPayload = {
-    model: "gpt-4o",
-    messages: [
-      {
-        role: "system",
-        content: "You are Anna, JP's friendly Australian digital assistant. Speak naturally and keep responses short and conversational.",
-      }
-    ],
-    stream: true,
-    max_tokens: 256,
-    temperature: 0.7
-  };
+app.post("/twilio/voice", (req, res) => {
+  const streamUrl = `wss://${req.headers.host}/media-stream`;
+  const twiml = `
+    <Response>
+      <Start>
+        <Stream url="${streamUrl}" track="inbound_track"/>
+      </Start>
+      <Pause length="30"/>
+    </Response>
+  `;
+  res.type("text/xml").send(twiml.trim());
+});
 
-  const req = https.request(
-    {
-      hostname: "api.openai.com",
-      path: "/v1/chat/completions",
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      }
+server.on("upgrade", (req, socket, head) => {
+  if (req.url === "/media-stream") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  }
+});
+
+wss.on("connection", (ws) => {
+  console.log("✅ WebSocket connection established");
+
+  let isStreamAlive = true;
+  let transcoderReady = false;
+
+  startTranscoder((chunk) => {
+    if (!transcoderReady) {
+      transcoderReady = true;
+      console.log("🎙️ Transcoder is now ready");
+    }
+    if (isStreamAlive) sendAudioToAI(chunk);
+  });
+
+  startAIStream(
+    (text) => {
+      console.log("📝 GPT Response:", text);
     },
-    (res) => {
-      res.on("data", (chunk) => {
-        partialBuffer += chunk.toString();
-
-        const parts = partialBuffer.split("\n\n");
-        partialBuffer = parts.pop(); // Save incomplete part
-
-        for (const part of parts) {
-          if (!part || !part.startsWith("data:")) continue;
-
-          const jsonPart = part.replace(/^data:\s*/, "");
-          if (jsonPart === "[DONE]") {
-            console.log("✅ OpenAI stream complete");
-            closeAIStream();
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(jsonPart);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) {
-              onTranscript(content);
-            }
-          } catch (err) {
-            console.error("⚠️ Error parsing OpenAI stream chunk:", err);
-          }
-        }
-      });
-
-      res.on("end", () => {
-        console.log("❌ OpenAI stream ended");
-      });
+    () => {
+      ws.close();
+    },
+    () => {
+      console.log("🧠 GPT-4o stream ready");
     }
   );
 
-  req.on("error", (err) => {
-    console.error("❌ OpenAI stream error:", err);
+  ws.on("message", (msg) => {
+    const data = JSON.parse(msg);
+    if (data.event === "start") {
+      console.log("🔗 Captured streamSid:", data.start.streamSid);
+    } else if (data.event === "media") {
+      if (transcoderReady) {
+        const audio = Buffer.from(data.media.payload, "base64");
+        pipeToTranscoder(audio);
+      } else {
+        console.log("⚠️ Audio skipped — transcoder not ready yet");
+      }
+    } else if (data.event === "stop") {
+      console.log("⛔ Twilio stream stopped");
+      isStreamAlive = false;
+      closeAIStream();
+    }
   });
 
-  req.write(JSON.stringify(requestPayload));
-  req.flushHeaders?.();
-  openaiRequest = req;
+  ws.on("close", () => {
+    console.log("❌ WebSocket connection closed");
+    closeAIStream();
+  });
 
-  if (onReady) onReady();
-}
+  ws.on("error", (err) => {
+    console.error("⚠️ WebSocket error:", err);
+    closeAIStream();
+  });
+});
 
-function sendAudioToAI(audioBuffer) {
-  // GPT-4o chat completions doesn’t accept real-time audio input yet
-  // You could buffer and summarize audio post-call or pipe text instead
-}
+app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 
-function closeAIStream() {
-  if (openaiRequest) {
-    openaiRequest.end();
-    openaiRequest = null;
-  }
-}
+server.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
 
-module.exports = {
-  startAIStream,
-  sendAudioToAI,
-  closeAIStream
-};
