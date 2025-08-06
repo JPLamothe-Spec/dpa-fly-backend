@@ -1,26 +1,27 @@
-// transcoder.js
 const prism = require("prism-media");
 
 let transcoder = null;
+let outputStream = null; // ✅ Needed for outputStream reference below
 
 function startTranscoder(onData) {
   transcoder = new prism.FFmpeg({
     args: [
-      "-f", "mulaw",      // Input from Twilio
+      "-f", "mulaw",
       "-ar", "8000",
       "-ac", "1",
       "-i", "pipe:0",
-      "-f", "s16le",      // Output: 16kHz PCM
+      "-f", "s16le",
       "-ar", "16000",
       "-ac", "1",
       "pipe:1"
     ]
   });
 
-  // ✅ Listen on stdout, NOT the main process
-  transcoder.stdout.on("data", onData);
+  outputStream = transcoder.stdout;
 
-  transcoder.on("error", (err) => {
+  outputStream.on("data", onData);
+
+  outputStream.on("error", (err) => {
     console.error("❌ Transcoder error:", err);
   });
 }
