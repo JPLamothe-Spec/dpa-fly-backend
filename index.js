@@ -5,12 +5,8 @@ const WebSocket = require("ws");
 const bodyParser = require("body-parser");
 require("dotenv").config();
 
-const synthesizeAndSend = require("./openaiTTS");
-const {
-  startAIStream,
-  sendAudioToAI,
-  closeAIStream,
-} = require("./openaiStream");
+const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
+const { startTranscoder, stopTranscoder, pipeToTranscoder } = require("./transcoder");
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -55,13 +51,7 @@ wss.on("connection", (ws) => {
 
   const handleTranscript = async (text) => {
     console.log("📝 GPT Response:", text);
-    if (isStreamAlive) {
-      try {
-        await synthesizeAndSend(text, ws, currentStreamSid);
-      } catch (err) {
-        console.error("⚠️ Failed to synthesize/send TTS:", err);
-      }
-    }
+    // No TTS path yet — transcript-only mode
   };
 
   startAIStream(
@@ -69,20 +59,16 @@ wss.on("connection", (ws) => {
     "You are Anna, JP’s friendly digital personal assistant. Greet the caller and ask how you can help.",
     () => {
       console.log("🧠 GPT-4o text stream ready");
-      const silence = Buffer.alloc(320); // 20ms of silence at 8kHz mulaw
-      sendAudioToAI(silence);
     }
   );
 
-  const ffmpeg = require("fluent-ffmpeg");
-  const ffmpegPath = require("ffmpeg-static");
-  ffmpeg.setFfmpegPath(ffmpegPath);
-  const { PassThrough } = require("stream");
+  startTranscoder((chunk) => {
+    if (isStreamAlive) sendAudioToAI(chunk);
+  });
 
   ws.on("message", (msg) => {
     try {
       const data = JSON.parse(msg);
-
       if (data.event === "media" && data.media?.payload) {
         const track = data.media.track || "inbound";
         if (track === "inbound") {
@@ -90,32 +76,13 @@ wss.on("connection", (ws) => {
             currentStreamSid = data.streamSid;
             console.log("🔗 Captured streamSid:", currentStreamSid);
           }
-
-          const ulawBuffer = Buffer.from(data.media.payload, "base64");
-
-          const input = new PassThrough();
-          input.end(ulawBuffer);
-
-          const convert = ffmpeg(input)
-            .audioCodec("pcm_s16le")
-            .audioFrequency(16000)
-            .audioChannels(1)
-            .format("s16le")
-            .on("error", (err) => {
-              console.error("❌ ffmpeg error:", err);
-            })
-            .pipe();
-
-          const pcmChunks = [];
-          convert.on("data", (chunk) => pcmChunks.push(chunk));
-          convert.on("end", () => {
-            const pcmBuffer = Buffer.concat(pcmChunks);
-            sendAudioToAI(pcmBuffer);
-          });
+          const audioBuffer = Buffer.from(data.media.payload, "base64");
+          pipeToTranscoder(audioBuffer);
         }
       } else if (data.event === "stop") {
         console.log("⛔ Twilio stream stopped");
         isStreamAlive = false;
+        stopTranscoder();
         closeAIStream();
       }
     } catch (err) {
@@ -126,12 +93,14 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     console.log("❌ WebSocket connection closed");
     isStreamAlive = false;
+    stopTranscoder();
     closeAIStream();
   });
 
   ws.on("error", (err) => {
     console.error("⚠️ WebSocket error:", err);
     isStreamAlive = false;
+    stopTranscoder();
     closeAIStream();
   });
 });
