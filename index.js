@@ -3,7 +3,7 @@ const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const { startTranscoder, pipeToTranscoder } = require("./transcoder");
-const { startAIStream, sendAudioToAI } = require("./openaiStream");
+const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
 require("dotenv").config();
 
 const app = express();
@@ -39,16 +39,7 @@ wss.on("connection", (ws) => {
   let isStreamAlive = true;
   let transcoderReady = false;
 
-  // 🔁 First start transcoder
-  startTranscoder((chunk) => {
-    if (!transcoderReady) {
-      transcoderReady = true;
-      console.log("🎙️ Transcoder is now ready");
-    }
-    if (isStreamAlive) sendAudioToAI(chunk);
-  });
-
-  // 🧠 Then start GPT stream
+  // Start GPT stream first
   startAIStream({
     onTranscript: (text) => {
       console.log("📝 Transcript:", text);
@@ -56,7 +47,22 @@ wss.on("connection", (ws) => {
     onClose: () => {
       ws.close();
     },
+    onReady: () => {
+      console.log("🧠 GPT-4o stream ready");
+    }
   });
+
+  // Then start transcoder with slight delay for safety
+  setTimeout(() => {
+    startTranscoder((chunk) => {
+      if (!transcoderReady) {
+        transcoderReady = true;
+        console.log("🎙️ Transcoder is now ready");
+      }
+      if (isStreamAlive) sendAudioToAI(chunk);
+    });
+  }, 100); // 100ms buffer
+  
 
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
@@ -72,20 +78,33 @@ wss.on("connection", (ws) => {
     } else if (data.event === "stop") {
       console.log("⛔ Twilio stream stopped");
       isStreamAlive = false;
+      closeAIStream();
     }
   });
 
   ws.on("close", () => {
     console.log("❌ WebSocket connection closed");
+    closeAIStream();
   });
 
   ws.on("error", (err) => {
     console.error("⚠️ WebSocket error:", err);
+    closeAIStream();
   });
 });
 
 app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 
-server.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
-});
+// ✅ Listen with graceful port collision handling
+server.listen(PORT)
+  .on("listening", () => {
+    console.log(`🚀 Server listening on port ${PORT}`);
+  })
+  .on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.error("❌ Port already in use. Exiting...");
+      process.exit(1);
+    } else {
+      throw err;
+    }
+  });
