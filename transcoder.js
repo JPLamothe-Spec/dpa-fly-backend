@@ -1,37 +1,24 @@
-// transcoder.js
-const prism = require("prism-media");
+const { spawn } = require("child_process");
 
 let transcoder = null;
-let isReady = false;
 
-/**
- * Starts the FFmpeg transcoder with proper event hooks
- * @param {(chunk: Buffer) => void} onData - Callback for each transcoded chunk
- */
 function startTranscoder(onData) {
-  transcoder = new prism.FFmpeg({
-    args: [
-      "-f", "mulaw",        // input format
-      "-ar", "8000",        // input sample rate
-      "-ac", "1",           // mono input
-      "-i", "pipe:0",       // from stdin
-      "-f", "s16le",        // output format
-      "-ar", "16000",       // output sample rate
-      "-ac", "1",           // mono output
-      "pipe:1"              // to stdout
-    ]
-  });
+  transcoder = spawn("ffmpeg", [
+    "-f", "mulaw",
+    "-ar", "8000",
+    "-ac", "1",
+    "-i", "pipe:0",
+    "-f", "s16le",
+    "-ar", "16000",
+    "-ac", "1",
+    "pipe:1"
+  ]);
 
-  // Confirm FFmpeg spawned
-  transcoder.once("spawn", () => {
-    isReady = true;
-    console.log("🎙️ FFmpeg transcoder is ready");
-  });
+  transcoder.stdout.on("data", onData);
 
-  // Forward audio chunks to the caller (e.g. GPT stream)
-  transcoder.stdout.on("data", (chunk) => {
-    console.log(`🔊 Transcoded chunk (${chunk.length} bytes)`);
-    onData(chunk);
+  transcoder.stderr.on("data", (data) => {
+    // Optional: show FFmpeg debug logs
+    console.error(`🔧 FFmpeg stderr: ${data}`);
   });
 
   transcoder.on("error", (err) => {
@@ -39,17 +26,12 @@ function startTranscoder(onData) {
   });
 
   transcoder.on("close", (code) => {
-    console.log(`⚠️ FFmpeg process exited with code ${code}`);
-    isReady = false;
+    console.log(`❌ Transcoder closed with code ${code}`);
   });
 }
 
-/**
- * Pipes incoming raw Twilio audio into the transcoder
- * @param {Buffer} buffer - Twilio's mulaw payload
- */
 function pipeToTranscoder(buffer) {
-  if (isReady && transcoder?.stdin?.writable) {
+  if (transcoder?.stdin?.writable) {
     transcoder.stdin.write(buffer);
   } else {
     console.warn("⚠️ Transcoder not ready or stdin not writable");
