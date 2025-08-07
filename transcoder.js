@@ -1,4 +1,4 @@
-// 🔁 Updated transcoder.js for time-based flush to GPT
+// ✅ Corrected transcoder.js for recurring audio flush
 
 const prism = require("prism-media");
 const ffmpeg = require("fluent-ffmpeg");
@@ -29,11 +29,11 @@ function startTranscoder(onAudioChunk) {
     })
     .pipe(outputStream);
 
-  // Collect audio for timed flush
+  // Collect audio chunks for timed flush
   let audioBuffer = [];
-  let flushTimeout = setTimeout(() => flushAudio(), 3000); // 3 second trigger
 
-  function flushAudio() {
+  // 🔁 Continuous flush every 3s
+  const flushInterval = setInterval(() => {
     if (audioBuffer.length > 0) {
       const merged = Buffer.concat(audioBuffer);
       console.log("🚀 Flushing buffered audio to GPT");
@@ -42,9 +42,9 @@ function startTranscoder(onAudioChunk) {
     } else {
       console.log("⚠️ No audio to flush to GPT");
     }
-  }
+  }, 3000);
 
-  // Pass chunks to buffer
+  // Add incoming audio to buffer
   outputStream.on("data", (chunk) => {
     audioBuffer.push(chunk);
   });
@@ -52,10 +52,11 @@ function startTranscoder(onAudioChunk) {
   return {
     write: (data) => inputStream.write(data),
     stop: () => {
-      clearTimeout(flushTimeout);
+      clearInterval(flushInterval);
       inputStream.end();
     },
   };
 }
 
 module.exports = startTranscoder;
+
