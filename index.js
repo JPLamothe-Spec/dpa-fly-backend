@@ -14,15 +14,13 @@ const PORT = process.env.PORT || 3000;
 
 app.post("/twilio/voice", (req, res) => {
   const streamUrl = `wss://${req.headers.host}/media-stream`;
-
-  // ✅ Say something minimal to answer the call
   const twiml = `
     <Response>
       <Say voice="alice">...</Say>
       <Start>
         <Stream url="${streamUrl}" track="inbound_track"/>
       </Start>
-      <Pause length="30"/>
+      <Pause length="60"/>
     </Response>
   `;
   res.type("text/xml").send(twiml.trim());
@@ -66,22 +64,24 @@ wss.on("connection", (ws) => {
     }
   };
 
+  // ✅ Start GPT stream
   startAIStream({
     onTranscript: handleTranscript,
     onClose: () => ws.close(),
     onReady: () => console.log(`[${new Date().toISOString()}] 🧠 GPT-4o stream ready`)
   });
 
-  // 🔁 Delay FFmpeg startup slightly
-  setTimeout(() => {
-    startTranscoder((chunk) => {
-      if (!transcoderReady) {
-        transcoderReady = true;
-        console.log(`[${new Date().toISOString()}] 🎙️ Transcoder is now ready`);
-      }
-      if (isStreamAlive) sendAudioToAI(chunk);
-    });
-  }, 100);
+  // ✅ Start transcoder immediately (no delay)
+  startTranscoder((chunk) => {
+    if (!transcoderReady) {
+      transcoderReady = true;
+      console.log(`[${new Date().toISOString()}] 🎙️ Transcoder is now ready`);
+    }
+    if (isStreamAlive) {
+      console.log(`[${new Date().toISOString()}] 🎧 Sending audio to GPT`);
+      sendAudioToAI(chunk);
+    }
+  });
 
   // 📡 Handle Twilio media stream
   ws.on("message", (msg) => {
