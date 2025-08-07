@@ -1,97 +1,96 @@
-const https = require("https");
+// index.js
+const express = require("express");
+const bodyParser = require("body-parser");
+const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
-require("dotenv").config();
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-let openaiRequest;
-let partialBuffer = "";
-
-function startAIStream({ onTranscript, onClose, onReady }) {
-  const sessionId = uuidv4();
-
-  const requestPayload = {
-    model: "gpt-4o",
-    messages: [
-      {
-        role: "system",
-        content: "You are Anna, JP's friendly Australian digital assistant. Speak naturally and keep responses short and conversational."
-      }
-    ],
-    stream: true,
-    max_tokens: 256,
-    temperature: 0.7
-  };
-
-  const req = https.request(
-    {
-      hostname: "api.openai.com",
-      path: "/v1/chat/completions",
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      }
-    },
-    (res) => {
-      res.on("data", (chunk) => {
-        partialBuffer += chunk.toString();
-        const parts = partialBuffer.split("\n\n");
-        partialBuffer = parts.pop();
-
-        for (const part of parts) {
-          if (!part || !part.startsWith("data:")) continue;
-
-          const jsonPart = part.replace(/^data:\s*/, "");
-          if (jsonPart === "[DONE]") {
-            console.log("✅ OpenAI stream complete");
-            closeAIStream();
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(jsonPart);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content && onTranscript) {
-              onTranscript(content);
-            }
-          } catch (err) {
-            console.error("⚠️ Error parsing OpenAI stream chunk:", err);
-          }
-        }
-      });
-
-      res.on("end", () => {
-        console.log("❌ OpenAI stream ended");
-        if (onClose) onClose();
-      });
-    }
-  );
-
-  req.on("error", (err) => {
-    console.error("❌ OpenAI stream error:", err);
-    if (onClose) onClose();
-  });
-
-  req.write(JSON.stringify(requestPayload));
-  req.flushHeaders?.();
-  openaiRequest = req;
-
-  if (onReady) onReady();
-}
-
-function sendAudioToAI(audioBuffer) {
-  // Not used with GPT-4o chat completions
-}
-
-function closeAIStream() {
-  if (openaiRequest) {
-    openaiRequest.end();
-    openaiRequest = null;
-  }
-}
-
-module.exports = {
+const {
   startAIStream,
   sendAudioToAI,
   closeAIStream
-};
+} = require("./openaiStream");
+
+const app = express();
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
+
+const server = app.listen(3000, () => {
+  console.log("🚀 Server listening on port 3000");
+});
+
+const wss = new WebSocket.Server({ noServer: true });
+
+server.on("upgrade", (request, socket, head) => {
+  if (request.url === "/media-stream") {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
+app.post("/twilio/voice", (req, res) => {
+  const twiml = `
+    <Response>
+      <Start>
+        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+      </Start>
+      <Pause length="30"/>
+    </Response>
+  `;
+  res.set("Content-Type", "text/xml");
+  res.set("Content-Length", Buffer.byteLength(twiml));
+  res.send(twiml);
+});
+
+wss.on("connection", (ws) => {
+  console.log("✅ WebSocket connection established");
+
+  const connectionId = uuidv4();
+  let aiStream = null;
+
+  function handleTwilioStream(ws, connectionId) {
+    aiStream = startAIStream({
+      onTranscript: async (transcript) => {
+        console.log("📝 Transcript:", transcript);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              event: "ai-response",
+              streamSid: connectionId,
+              text: transcript
+            })
+          );
+        } else {
+          console.log("⚠️ TTS skipped – WebSocket already closed");
+        }
+      },
+      onClose: () => {
+        console.log("❌ OpenAI stream ended");
+      },
+      onReady: () => {
+        console.log("🎤 AI stream ready");
+      }
+    });
+  }
+
+  handleTwilioStream(ws, connectionId);
+
+  ws.on("message", (message) => {
+    const parsed = JSON.parse(message);
+    if (parsed.event === "start") {
+      console.log("🟢 Twilio stream started");
+    } else if (parsed.event === "media" && parsed.media?.payload) {
+      const audioBuffer = Buffer.from(parsed.media.payload, "base64");
+      sendAudioToAI(audioBuffer);
+    } else if (parsed.event === "stop") {
+      console.log("⛔ Twilio stream stopped");
+      closeAIStream();
+    }
+  });
+
+  ws.on("close", () => {
+    console.log("❌ WebSocket connection closed");
+    closeAIStream();
+  });
+});
