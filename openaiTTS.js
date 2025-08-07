@@ -3,16 +3,17 @@
 const fetch = require("node-fetch");
 const { v4: uuidv4 } = require("uuid");
 
-// Voice: Breeze is friendly + slightly Aussie
-const VOICE = "echo"; // Options: alloy, echo, fable, onyx, nova, shimmer
-const MODEL = "tts-1"; // Or use "tts-1-hd" for higher fidelity
+// ✅ OpenAI TTS config
+const VOICE = "echo";         // Options: alloy, echo, fable, onyx, nova, shimmer
+const MODEL = "tts-1";        // Use "tts-1-hd" for higher fidelity (optional)
 
 /**
  * Synthesizes speech from text using OpenAI's TTS API and sends to Twilio WebSocket
  * @param {string} text - The text to synthesize
  * @param {WebSocket} ws - The Twilio media WebSocket
+ * @param {string} streamSid - The Twilio streamSid (required by Twilio media format)
  */
-async function synthesizeAndSend(text, ws) {
+async function synthesizeAndSend(text, ws, streamSid = uuidv4()) {
   try {
     if (!ws || ws.readyState !== 1) {
       console.warn("⚠️ WebSocket not open – cannot send audio");
@@ -31,7 +32,7 @@ async function synthesizeAndSend(text, ws) {
         model: MODEL,
         input: text,
         voice: VOICE,
-        response_format: "pcm",         // Required for Twilio media
+        response_format: "pcm",  // Required for Twilio compatibility
         speed: 1.0
       })
     });
@@ -42,14 +43,8 @@ async function synthesizeAndSend(text, ws) {
       return;
     }
 
-    const reader = response.body.getReader();
-    let audioBuffer = Buffer.alloc(0);
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) audioBuffer = Buffer.concat([audioBuffer, Buffer.from(value)]);
-    }
+    // ✅ Compatible with Node.js (no streaming required)
+    const audioBuffer = await response.buffer();
 
     if (!audioBuffer.length) {
       console.warn("⚠️ No audio buffer received");
@@ -58,7 +53,7 @@ async function synthesizeAndSend(text, ws) {
 
     const mediaMessage = {
       event: "media",
-      streamSid: uuidv4(), // Twilio expects a unique streamSid for each audio chunk
+      streamSid,
       media: {
         payload: audioBuffer.toString("base64")
       }
@@ -73,4 +68,3 @@ async function synthesizeAndSend(text, ws) {
 }
 
 module.exports = { synthesizeAndSend };
-
