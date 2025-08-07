@@ -1,5 +1,3 @@
-// openaiStream.js
-
 const https = require("https");
 const { v4: uuidv4 } = require("uuid");
 require("dotenv").config();
@@ -8,13 +6,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 let openaiRequest;
 let partialBuffer = "";
 
-/**
- * Starts the OpenAI streaming request
- * @param {Function} onTranscript - Called for each partial transcript
- * @param {Function} onClose - Called when the stream ends or errors
- * @param {Function} onReady - Called once the stream is initialized
- */
-function startAIStream(onTranscript, onClose, onReady) {
+function startAIStream({ onTranscript, onClose, onReady }) {
   const sessionId = uuidv4();
 
   const requestPayload = {
@@ -59,8 +51,7 @@ function startAIStream(onTranscript, onClose, onReady) {
           try {
             const parsed = JSON.parse(jsonPart);
             const content = parsed.choices?.[0]?.delta?.content;
-            if (content) {
-              console.log(`[${new Date().toISOString()}] 📝 Transcript: ${content}`);
+            if (content && onTranscript) {
               onTranscript(content);
             }
           } catch (err) {
@@ -71,25 +62,25 @@ function startAIStream(onTranscript, onClose, onReady) {
 
       res.on("end", () => {
         console.log("❌ OpenAI stream ended");
-        onClose?.();
+        if (onClose) onClose();
       });
     }
   );
 
   req.on("error", (err) => {
     console.error("❌ OpenAI stream error:", err);
-    onClose?.();
+    if (onClose) onClose();
   });
 
   req.write(JSON.stringify(requestPayload));
   req.flushHeaders?.();
   openaiRequest = req;
 
-  onReady?.();
+  if (onReady) onReady();
 }
 
 function sendAudioToAI(audioBuffer) {
-  // Placeholder: GPT-4o chat completions does not currently accept real-time audio input.
+  // Not used with GPT-4o chat completions
 }
 
 function closeAIStream() {
