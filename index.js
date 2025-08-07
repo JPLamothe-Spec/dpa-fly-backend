@@ -1,129 +1,121 @@
 // index.js
+
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
-const { startTranscoder, pipeToTranscoder } = require("./transcoder");
-const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
-const { synthesizeAndSend } = require("./openaiTTS");
-require("dotenv").config();
+const bodyParser = require("body-parser");
+const dotenv = require("dotenv");
+dotenv.config();
+
+const startTranscoder = require("./transcoder");
+const startAIStream = require("./openaiStream");
+const synthesizeAndSend = require("./openaiTTS");
 
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ noServer: true });
+app.use(bodyParser.urlencoded({ extended: false }));
 const PORT = process.env.PORT || 3000;
 
+// 🧠 Global state
+let aiStream = null;
+let twilioSocket = null;
+let transcoderReady = false;
+let isStreamAlive = true;
+
+// ✅ Twilio Webhook – answers call & starts media stream
 app.post("/twilio/voice", (req, res) => {
-  const streamUrl = `wss://${req.headers.host}/media-stream`;
   const twiml = `
     <Response>
-      <Say voice="alice">...</Say>
       <Start>
-        <Stream url="${streamUrl}" track="inbound_track"/>
+        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
       </Start>
       <Pause length="60"/>
     </Response>
   `;
-  res.type("text/xml").send(twiml.trim());
+  res.setHeader("Content-Type", "text/xml");
+  res.setHeader("Content-Length", Buffer.byteLength(twiml));
+  res.send(twiml.trim());
 });
 
+// ✅ Create server + WebSocket layer
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ noServer: true });
+
+// 🔌 Handle WebSocket upgrade
 server.on("upgrade", (req, socket, head) => {
   if (req.url === "/media-stream") {
     wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req);
+      handleTwilioStream(ws);
     });
   }
 });
 
-wss.on("connection", (ws) => {
-  console.log(`[${new Date().toISOString()}] ✅ WebSocket connection established`);
+// 🎧 Handle Twilio media stream
+function handleTwilioStream(ws) {
+  console.log("✅ WebSocket connection established");
+  twilioSocket = ws;
+  isStreamAlive = true;
+  transcoderReady = false;
 
-  let isStreamAlive = true;
-  let transcoderReady = false;
   let streamSid = null;
-  let transcriptBuffer = "";
 
-  // 🔊 Handle GPT response
-  const handleTranscript = async (text) => {
-    console.log(`[${new Date().toISOString()}] 📝 Transcript:`, text);
-    transcriptBuffer += text;
+  // ✅ Start AI stream
+  aiStream = startAIStream(async (transcript) => {
+    console.log(`[${new Date().toISOString()}] 📝 Transcript: ${transcript}`);
+    if (twilioSocket && twilioSocket.readyState === WebSocket.OPEN) {
+      await synthesizeAndSend(transcript, twilioSocket);
+    } else {
+      console.log("⚠️ TTS skipped – WebSocket already closed");
+    }
+  });
 
-    if (/[.!?]\s*$/.test(transcriptBuffer)) {
-      const finalSentence = transcriptBuffer.trim();
-      transcriptBuffer = "";
-
-      if (ws.readyState === 1) {
-        if (!streamSid) {
-          console.warn(`[${new Date().toISOString()}] ⚠️ synthesizeAndSend skipped — streamSid not yet captured`);
-        } else {
-          console.log(`[${new Date().toISOString()}] 📣 Calling synthesizeAndSend:`, finalSentence);
-          await synthesizeAndSend(finalSentence, ws, streamSid);
-        }
-      } else {
-        console.warn(`[${new Date().toISOString()}] ⚠️ TTS skipped – WebSocket already closed`);
+  // ⏱️ Delay FFmpeg startup to avoid missed audio
+  setTimeout(() => {
+    startTranscoder((chunk) => {
+      if (!transcoderReady) {
+        transcoderReady = true;
+        console.log("🎙️ Transcoder is now ready");
       }
-    }
-  };
+      if (isStreamAlive) {
+        aiStream.sendAudio(chunk);
+      }
+    });
+  }, 100);
 
-  // ✅ Start GPT stream
-  startAIStream({
-    onTranscript: handleTranscript,
-    onClose: () => ws.close(),
-    onReady: () => console.log(`[${new Date().toISOString()}] 🧠 GPT-4o stream ready`)
-  });
-
-  // ✅ Start transcoder immediately (no delay)
-  startTranscoder((chunk) => {
-    if (!transcoderReady) {
-      transcoderReady = true;
-      console.log(`[${new Date().toISOString()}] 🎙️ Transcoder is now ready`);
-    }
-    if (isStreamAlive) {
-      console.log(`[${new Date().toISOString()}] 🎧 Sending audio to GPT`);
-      sendAudioToAI(chunk);
-    }
-  });
-
-  // 📡 Handle Twilio media stream
+  // 🔄 Incoming Twilio audio
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
-
     if (data.event === "start") {
-      streamSid = data.start.streamSid;
-      console.log(`[${new Date().toISOString()}] 🔗 Captured streamSid:`, streamSid);
-    } else if (data.event === "media") {
-      if (transcoderReady) {
-        const audio = Buffer.from(data.media.payload, "base64");
-        pipeToTranscoder(audio);
-      } else {
-        console.log(`[${new Date().toISOString()}] ⚠️ Audio skipped — transcoder not ready yet`);
-      }
-    } else if (data.event === "stop") {
+      streamSid = data.streamSid;
+      console.log(`🔗 Captured streamSid: ${streamSid}`);
+    }
+    if (data.event === "media" && transcoderReady) {
+      const audio = Buffer.from(data.media.payload, "base64");
+      aiStream.write(audio);
+    }
+    if (data.event === "stop") {
       console.log(`[${new Date().toISOString()}] ⛔ Twilio stream stopped`);
       isStreamAlive = false;
-      closeAIStream();
+      aiStream.end();
     }
   });
 
   ws.on("close", () => {
     console.log(`[${new Date().toISOString()}] ❌ WebSocket connection closed`);
-    closeAIStream();
+    isStreamAlive = false;
+    aiStream.end();
   });
 
   ws.on("error", (err) => {
-    console.error(`[${new Date().toISOString()}] ⚠️ WebSocket error:`, err);
-    closeAIStream();
+    console.error("⚠️ WebSocket error:", err);
+    isStreamAlive = false;
+    aiStream.end();
   });
+}
+
+// 🩺 Health check
+app.get("/", (req, res) => res.status(200).send("✅ DPA backend is live"));
+
+// 🚀 Start server
+server.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
 });
-
-app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
-
-server.listen(PORT)
-  .on("listening", () => console.log(`[${new Date().toISOString()}] 🚀 Server listening on port ${PORT}`))
-  .on("error", (err) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(`[${new Date().toISOString()}] ❌ Port already in use. Exiting...`);
-      process.exit(1);
-    } else {
-      throw err;
-    }
-  });
