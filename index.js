@@ -4,7 +4,7 @@ const http = require("http");
 const WebSocket = require("ws");
 const { startTranscoder, pipeToTranscoder } = require("./transcoder");
 const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
-const { synthesizeAndSend } = require("./openaiTTS"); // ✅ fixed import
+const { synthesizeAndSend } = require("./openaiTTS"); // ✅ Fixed import
 require("dotenv").config();
 
 const app = express();
@@ -34,7 +34,7 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 wss.on("connection", (ws) => {
-  console.log("✅ WebSocket connection established");
+  console.log(`[${new Date().toISOString()}] ✅ WebSocket connection established`);
 
   let isStreamAlive = true;
   let transcoderReady = false;
@@ -43,16 +43,20 @@ wss.on("connection", (ws) => {
 
   // 🔊 Handle GPT response
   const handleTranscript = async (text) => {
-    console.log("📝 Transcript:", text);
+    console.log(`[${new Date().toISOString()}] 📝 Transcript:`, text);
     transcriptBuffer += text;
 
     if (/[.!?]\s*$/.test(transcriptBuffer)) {
       const finalSentence = transcriptBuffer.trim();
       transcriptBuffer = "";
 
-      if (ws.readyState === 1 && streamSid) {
-        console.log("📣 Calling synthesizeAndSend:", finalSentence); // ✅ Debug line
-        await synthesizeAndSend(finalSentence, ws, streamSid);
+      if (ws.readyState === 1) {
+        if (!streamSid) {
+          console.warn(`[${new Date().toISOString()}] ⚠️ synthesizeAndSend skipped — streamSid not yet captured`);
+        } else {
+          console.log(`[${new Date().toISOString()}] 📣 Calling synthesizeAndSend:`, finalSentence);
+          await synthesizeAndSend(finalSentence, ws, streamSid);
+        }
       }
     }
   };
@@ -60,7 +64,7 @@ wss.on("connection", (ws) => {
   startAIStream({
     onTranscript: handleTranscript,
     onClose: () => ws.close(),
-    onReady: () => console.log("🧠 GPT-4o stream ready"),
+    onReady: () => console.log(`[${new Date().toISOString()}] 🧠 GPT-4o stream ready`)
   });
 
   // 🔁 Delay FFmpeg startup slightly
@@ -68,7 +72,7 @@ wss.on("connection", (ws) => {
     startTranscoder((chunk) => {
       if (!transcoderReady) {
         transcoderReady = true;
-        console.log("🎙️ Transcoder is now ready");
+        console.log(`[${new Date().toISOString()}] 🎙️ Transcoder is now ready`);
       }
       if (isStreamAlive) sendAudioToAI(chunk);
     });
@@ -80,28 +84,28 @@ wss.on("connection", (ws) => {
 
     if (data.event === "start") {
       streamSid = data.start.streamSid;
-      console.log("🔗 Captured streamSid:", streamSid);
+      console.log(`[${new Date().toISOString()}] 🔗 Captured streamSid:`, streamSid);
     } else if (data.event === "media") {
       if (transcoderReady) {
         const audio = Buffer.from(data.media.payload, "base64");
         pipeToTranscoder(audio);
       } else {
-        console.log("⚠️ Audio skipped — transcoder not ready yet");
+        console.log(`[${new Date().toISOString()}] ⚠️ Audio skipped — transcoder not ready yet`);
       }
     } else if (data.event === "stop") {
-      console.log("⛔ Twilio stream stopped");
+      console.log(`[${new Date().toISOString()}] ⛔ Twilio stream stopped`);
       isStreamAlive = false;
       closeAIStream();
     }
   });
 
   ws.on("close", () => {
-    console.log("❌ WebSocket connection closed");
+    console.log(`[${new Date().toISOString()}] ❌ WebSocket connection closed`);
     closeAIStream();
   });
 
   ws.on("error", (err) => {
-    console.error("⚠️ WebSocket error:", err);
+    console.error(`[${new Date().toISOString()}] ⚠️ WebSocket error:`, err);
     closeAIStream();
   });
 });
@@ -109,10 +113,10 @@ wss.on("connection", (ws) => {
 app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 
 server.listen(PORT)
-  .on("listening", () => console.log(`🚀 Server listening on port ${PORT}`))
+  .on("listening", () => console.log(`[${new Date().toISOString()}] 🚀 Server listening on port ${PORT}`))
   .on("error", (err) => {
     if (err.code === "EADDRINUSE") {
-      console.error("❌ Port already in use. Exiting...");
+      console.error(`[${new Date().toISOString()}] ❌ Port already in use. Exiting...`);
       process.exit(1);
     } else {
       throw err;
