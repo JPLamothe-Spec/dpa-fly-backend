@@ -1,64 +1,61 @@
-// transcoder.js
+// 🔁 Updated transcoder.js for time-based flush to GPT
 
-const { spawn } = require("child_process");
 const prism = require("prism-media");
+const ffmpeg = require("fluent-ffmpeg");
+const ffmpegPath = require("ffmpeg-static");
+const { PassThrough } = require("stream");
 
-let ffmpeg;
+function startTranscoder(onAudioChunk) {
+  const inputStream = new PassThrough();
+  const outputStream = new PassThrough();
 
-/**
- * Starts the FFmpeg transcoder and pipes audio chunks to the callback.
- * Converts Twilio's mulaw@8000 to s16le@16000 mono (OpenAI compatible).
- * 
- * @param {Function} onChunk - Callback to receive audio chunks
- */
-function startTranscoder(onChunk) {
-  console.log(`[${new Date().toISOString()}] 🔧 Starting FFmpeg transcoder...`);
+  ffmpeg.setFfmpegPath(ffmpegPath);
+  const ffmpegProcess = ffmpeg()
+    .input(inputStream)
+    .inputFormat("mulaw")
+    .audioFrequency(8000)
+    .audioChannels(1)
+    .audioCodec("pcm_s16le")
+    .format("s16le")
+    .audioFilters("aresample=16000")
+    .on("start", () => {
+      console.log("🔄 FFmpeg started");
+    })
+    .on("error", (err) => {
+      console.error("❌ FFmpeg error:", err.message);
+    })
+    .on("stderr", (stderrLine) => {
+      console.log("⚠️ FFmpeg stderr:", stderrLine);
+    })
+    .pipe(outputStream);
 
-  // Spawn ffmpeg to transcode mu-law 8000hz mono to 16-bit 16khz PCM
-  ffmpeg = spawn("ffmpeg", [
-    "-f", "mulaw",
-    "-ar", "8000",
-    "-ac", "1",
-    "-i", "pipe:0",
-    "-f", "s16le",
-    "-ar", "16000",
-    "-ac", "1",
-    "pipe:1"
-  ]);
+  // Collect audio for timed flush
+  let audioBuffer = [];
+  let flushTimeout = setTimeout(() => flushAudio(), 3000); // 3 second trigger
 
-  // Handle output chunks
-  ffmpeg.stdout.on("data", (chunk) => {
-    console.log(`[${new Date().toISOString()}] 🟢 Transcoder emitted audio chunk (${chunk.length} bytes)`);
-    onChunk(chunk);
-  });
-
-  // Log FFmpeg errors
-  ffmpeg.stderr.on("data", (data) => {
-    console.error(`[${new Date().toISOString()}] ⚠️ FFmpeg stderr: ${data.toString()}`);
-  });
-
-  ffmpeg.on("error", (err) => {
-    console.error(`[${new Date().toISOString()}] ❌ FFmpeg error:`, err);
-  });
-
-  ffmpeg.on("close", (code) => {
-    console.warn(`[${new Date().toISOString()}] 🚪 FFmpeg process exited with code ${code}`);
-  });
-}
-
-/**
- * Pipes raw media audio into the transcoder stdin.
- * @param {Buffer} audio - Incoming base64-decoded audio buffer from Twilio
- */
-function pipeToTranscoder(audio) {
-  if (ffmpeg && ffmpeg.stdin.writable) {
-    ffmpeg.stdin.write(audio);
-  } else {
-    console.warn(`[${new Date().toISOString()}] ⚠️ Tried to write to FFmpeg stdin but it's not writable`);
+  function flushAudio() {
+    if (audioBuffer.length > 0) {
+      const merged = Buffer.concat(audioBuffer);
+      console.log("🚀 Flushing buffered audio to GPT");
+      onAudioChunk(merged);
+      audioBuffer = []; // Reset buffer
+    } else {
+      console.log("⚠️ No audio to flush to GPT");
+    }
   }
+
+  // Pass chunks to buffer
+  outputStream.on("data", (chunk) => {
+    audioBuffer.push(chunk);
+  });
+
+  return {
+    write: (data) => inputStream.write(data),
+    stop: () => {
+      clearTimeout(flushTimeout);
+      inputStream.end();
+    },
+  };
 }
 
-module.exports = {
-  startTranscoder,
-  pipeToTranscoder
-};
+module.exports = startTranscoder;
