@@ -38,7 +38,6 @@ wss.on("connection", (ws) => {
   console.log(`[${new Date().toISOString()}] ✅ WebSocket connection established`);
 
   let isStreamAlive = true;
-  let transcoderReady = false;
   let streamSid = null;
   let transcriptBuffer = "";
 
@@ -51,7 +50,7 @@ wss.on("connection", (ws) => {
       const finalSentence = transcriptBuffer.trim();
       transcriptBuffer = "";
 
-      if (ws.readyState === 1) {
+      if (ws.readyState === WebSocket.OPEN) {
         if (!streamSid) {
           console.warn(`[${new Date().toISOString()}] ⚠️ synthesizeAndSend skipped — streamSid not yet captured`);
         } else {
@@ -71,16 +70,10 @@ wss.on("connection", (ws) => {
     onReady: () => console.log(`[${new Date().toISOString()}] 🧠 GPT-4o stream ready`)
   });
 
-  // ✅ Start transcoder immediately (no delay)
+  // ✅ Start transcoder immediately
   startTranscoder((chunk) => {
-    if (!transcoderReady) {
-      transcoderReady = true;
-      console.log(`[${new Date().toISOString()}] 🎙️ Transcoder is now ready`);
-    }
-    if (isStreamAlive) {
-      console.log(`[${new Date().toISOString()}] 🎧 Sending audio to GPT`);
-      sendAudioToAI(chunk);
-    }
+    console.log(`[${new Date().toISOString()}] 🎧 Sending audio to GPT`);
+    sendAudioToAI(chunk);
   });
 
   // 📡 Handle Twilio media stream
@@ -91,12 +84,8 @@ wss.on("connection", (ws) => {
       streamSid = data.start.streamSid;
       console.log(`[${new Date().toISOString()}] 🔗 Captured streamSid:`, streamSid);
     } else if (data.event === "media") {
-      if (transcoderReady) {
-        const audio = Buffer.from(data.media.payload, "base64");
-        pipeToTranscoder(audio);
-      } else {
-        console.log(`[${new Date().toISOString()}] ⚠️ Audio skipped — transcoder not ready yet`);
-      }
+      const audio = Buffer.from(data.media.payload, "base64");
+      pipeToTranscoder(audio);
     } else if (data.event === "stop") {
       console.log(`[${new Date().toISOString()}] ⛔ Twilio stream stopped`);
       isStreamAlive = false;
@@ -127,4 +116,3 @@ server.listen(PORT)
       throw err;
     }
   });
-
