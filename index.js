@@ -4,7 +4,7 @@ const http = require("http");
 const WebSocket = require("ws");
 const { startTranscoder, pipeToTranscoder } = require("./transcoder");
 const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
-const { synthesizeAndSend } = require("./openaiTTS"); // ✅ Fixed import
+const { synthesizeAndSend } = require("./openaiTTS");
 require("dotenv").config();
 
 const app = express();
@@ -14,8 +14,11 @@ const PORT = process.env.PORT || 3000;
 
 app.post("/twilio/voice", (req, res) => {
   const streamUrl = `wss://${req.headers.host}/media-stream`;
+
+  // ✅ Say something minimal to answer the call
   const twiml = `
     <Response>
+      <Say voice="alice">...</Say>
       <Start>
         <Stream url="${streamUrl}" track="inbound_track"/>
       </Start>
@@ -57,6 +60,8 @@ wss.on("connection", (ws) => {
           console.log(`[${new Date().toISOString()}] 📣 Calling synthesizeAndSend:`, finalSentence);
           await synthesizeAndSend(finalSentence, ws, streamSid);
         }
+      } else {
+        console.warn(`[${new Date().toISOString()}] ⚠️ TTS skipped – WebSocket already closed`);
       }
     }
   };
