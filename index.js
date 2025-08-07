@@ -38,19 +38,26 @@ wss.on("connection", (ws) => {
   console.log(`[${new Date().toISOString()}] ✅ WebSocket connection established`);
 
   let isStreamAlive = true;
+  let transcoderReady = false;
   let streamSid = null;
   let transcriptBuffer = "";
+  let lastFlushTime = Date.now();
 
   // 🔊 Handle GPT response
   const handleTranscript = async (text) => {
     console.log(`[${new Date().toISOString()}] 📝 Transcript:`, text);
     transcriptBuffer += text;
+    const now = Date.now();
 
-    if (/[.!?]\s*$/.test(transcriptBuffer)) {
+    const isFinalPunctuation = /[.!?]\s*$/.test(transcriptBuffer);
+    const isFlushDue = now - lastFlushTime > 1000 && transcriptBuffer.trim().length > 5;
+
+    if (isFinalPunctuation || isFlushDue) {
       const finalSentence = transcriptBuffer.trim();
       transcriptBuffer = "";
+      lastFlushTime = now;
 
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws.readyState === 1) {
         if (!streamSid) {
           console.warn(`[${new Date().toISOString()}] ⚠️ synthesizeAndSend skipped — streamSid not yet captured`);
         } else {
@@ -72,8 +79,14 @@ wss.on("connection", (ws) => {
 
   // ✅ Start transcoder immediately
   startTranscoder((chunk) => {
-    console.log(`[${new Date().toISOString()}] 🎧 Sending audio to GPT`);
-    sendAudioToAI(chunk);
+    if (!transcoderReady) {
+      transcoderReady = true;
+      console.log(`[${new Date().toISOString()}] 🎙️ Transcoder is now ready`);
+    }
+    if (isStreamAlive) {
+      console.log(`[${new Date().toISOString()}] 🎧 Sending audio to GPT`);
+      sendAudioToAI(chunk);
+    }
   });
 
   // 📡 Handle Twilio media stream
@@ -84,8 +97,12 @@ wss.on("connection", (ws) => {
       streamSid = data.start.streamSid;
       console.log(`[${new Date().toISOString()}] 🔗 Captured streamSid:`, streamSid);
     } else if (data.event === "media") {
-      const audio = Buffer.from(data.media.payload, "base64");
-      pipeToTranscoder(audio);
+      if (transcoderReady) {
+        const audio = Buffer.from(data.media.payload, "base64");
+        pipeToTranscoder(audio);
+      } else {
+        console.log(`[${new Date().toISOString()}] ⚠️ Audio skipped — transcoder not ready yet`);
+      }
     } else if (data.event === "stop") {
       console.log(`[${new Date().toISOString()}] ⛔ Twilio stream stopped`);
       isStreamAlive = false;
