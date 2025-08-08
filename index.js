@@ -7,11 +7,11 @@ const http = require("http");
 const WebSocket = require("ws");
 require("dotenv").config();
 
-const { startAIStream, sendAudioToAI, commitAudioToAI, closeAIStream } = require("./openaiStream");
-const { synthesizeAndSend } = require("./openaiTTS");
-
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+app.use(bodyParser.json());
+
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 
 if (!TELNYX_API_KEY) {
@@ -19,19 +19,28 @@ if (!TELNYX_API_KEY) {
   process.exit(1);
 }
 
-app.use(bodyParser.json());
-
-// Track answered calls
+// In-memory set to track answered calls
 const answeredCalls = new Set();
 
-// Store active GPT stream and Twilio WS per call
-const activeCalls = new Map();
+// Placeholder for starting streaming logic
+function startStreaming(callControlId) {
+  console.log(`▶️ Starting stream for call_control_id: ${callControlId}`);
+  // TODO: Add your stream_start logic here
+}
 
+// Answer call via Telnyx API (strip 'v3:' prefix if present)
 async function answerCall(callControlId) {
+  if (!callControlId) {
+    console.warn("⚠️ No callControlId provided to answerCall()");
+    return;
+  }
+
   if (callControlId.startsWith("v3:")) {
     callControlId = callControlId.substring(3);
   }
+
   const url = `https://api.telnyx.com/v2/calls/${callControlId}/actions/answer`;
+
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -41,6 +50,7 @@ async function answerCall(callControlId) {
       },
       body: JSON.stringify({}),
     });
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error("❌ Failed to answer call:", errorText);
@@ -52,34 +62,15 @@ async function answerCall(callControlId) {
   }
 }
 
-function startStreaming(callControlId) {
-  console.log(`▶️ Starting GPT stream for call_control_id: ${callControlId}`);
-
-  startAIStream({
-    onTranscript: async (partial) => {
-      console.log(`📝 GPT Transcript partial: ${partial.text || partial}`);
-      // Example: send partial transcript as TTS back to caller
-      const callData = activeCalls.get(callControlId);
-      if (callData?.ws) {
-        await synthesizeAndSend(partial.text || partial, callData.ws, callControlId);
-      }
-    },
-    onClose: () => {
-      console.log(`❌ GPT stream closed for call_control_id: ${callControlId}`);
-      activeCalls.delete(callControlId);
-    },
-    onReady: () => {
-      console.log(`✅ GPT stream ready for call_control_id: ${callControlId}`);
-    }
-  });
-}
-
-// Telnyx webhook to handle call events
+// Telnyx webhook with full debug and flexible call_control_id extraction
 app.post("/telnyx-stream", async (req, res) => {
-  const eventType = req.body.data?.event_type || "UNKNOWN";
-  let callControlId = req.body.data?.call_control_id;
+  console.log(`\n[${new Date().toISOString()}] Telnyx webhook received:`);
+  console.log(JSON.stringify(req.body, null, 2));
 
-  console.log(`[${new Date().toISOString()}] Telnyx event received: ${eventType}`);
+  const eventType = req.body.data?.event_type || "UNKNOWN";
+
+  // Try to get call_control_id from common places
+  let callControlId = req.body.data?.call_control_id || req.body.data?.payload?.call_control_id;
 
   if (!callControlId) {
     console.error("❌ Missing call_control_id in event payload, skipping processing.");
@@ -116,7 +107,7 @@ app.post("/twilio/voice", (req, res) => {
   res.send(twiml);
 });
 
-// HTTP server and WebSocket setup
+// HTTP and WebSocket server setup for Twilio media streaming
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 
@@ -130,42 +121,21 @@ server.on("upgrade", (request, socket, head) => {
   }
 });
 
-wss.on("connection", (ws, request) => {
-  console.log("✅ Twilio WebSocket connection established");
-
-  // Extract callControlId from query or headers if possible (optional)
-  // For this example, we won't bind ws to a callControlId automatically
+wss.on("connection", (ws) => {
+  console.log("✅ WebSocket connection established");
 
   ws.on("message", (message) => {
-    try {
-      const msg = JSON.parse(message);
-
-      if (msg.event === "media" && msg.media?.payload) {
-        const audioBuffer = Buffer.from(msg.media.payload, "base64");
-
-        // For demo, just log length and forward to GPT if active
-        console.log(`📨 Received audio chunk: ${audioBuffer.length} bytes`);
-
-        // Forward to GPT stream for all active calls (simplification)
-        for (const [callControlId, callData] of activeCalls) {
-          sendAudioToAI(audioBuffer);
-        }
-      }
-    } catch (err) {
-      console.error("⚠️ Error processing WebSocket message:", err);
-    }
+    console.log(`📨 Media Stream Message: ${message.length} bytes`);
+    // TODO: Handle Twilio audio chunks here
   });
 
   ws.on("close", () => {
-    console.log("❌ Twilio WebSocket connection closed");
+    console.log("❌ WebSocket connection closed");
   });
 
   ws.on("error", (err) => {
-    console.error("⚠️ Twilio WebSocket error:", err);
+    console.error("⚠️ WebSocket error:", err);
   });
-
-  // Store ws somewhere if needed (for sending TTS back)
-  // For demo purposes, skipping call linking here
 });
 
 app.get("/", (req, res) => {
