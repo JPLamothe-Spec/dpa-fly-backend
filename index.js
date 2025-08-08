@@ -26,10 +26,10 @@ app.post("/telnyx-stream", (req, res) => {
       {
         name: "streaming_start",
         params: {
-          url: "wss://dpa-fly-backend-ufegxw.fly.dev/telnyx-stream", // ✅ matches your domain
+          url: "wss://dpa-fly-backend-ufegxw.fly.dev/telnyx-stream",
           audio: {
-            format: "pcm_s16le",   // 16-bit PCM
-            sample_rate: 16000     // 16 kHz
+            format: "pcm_s16le",
+            sample_rate: 16000
           }
         }
       }
@@ -43,10 +43,15 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 
 server.on("upgrade", (req, socket, head) => {
-  if (req.url === "/telnyx-stream") {
+  console.log("🔍 WS upgrade request URL:", req.url);
+
+  // Accept WS upgrades for /telnyx-stream with or without query parameters
+  if (req.url && req.url.startsWith("/telnyx-stream")) {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });
+  } else {
+    socket.destroy();
   }
 });
 
@@ -73,12 +78,12 @@ wss.on("connection", (ws) => {
       if (msg.event === "media" && msg.media?.payload) {
         const audioBuffer = Buffer.from(msg.media.payload, "base64");
         console.log(`🎧 Received ${audioBuffer.length} bytes PCM audio`);
-        sendAudioToAI(audioBuffer); // ✅ send to GPT
+        sendAudioToAI(audioBuffer);
       }
 
       if (msg.event === "stop") {
         console.log("⏹ Telnyx stream stopped");
-        commitAudioToAI(); // ✅ tell GPT to process
+        commitAudioToAI();
         closeAIStream();
         ws.close();
       }
@@ -104,4 +109,3 @@ app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
-
