@@ -19,6 +19,9 @@ if (!TELNYX_API_KEY) {
   process.exit(1);
 }
 
+// In-memory set to track which calls have been answered
+const answeredCalls = new Set();
+
 // Start streaming placeholder
 function startStreaming(callControlId) {
   console.log(`▶️ Starting stream for call_control_id: ${callControlId}`);
@@ -58,15 +61,20 @@ app.post("/telnyx-stream", async (req, res) => {
   let callControlId = req.body.data?.call_control_id;
 
   console.log(`[${new Date().toISOString()}] Telnyx event received: ${eventType}`);
-  console.log("Full payload:", JSON.stringify(req.body, null, 2));
 
   if (!callControlId) {
     console.error("❌ Missing call_control_id in event payload, skipping processing.");
     return res.status(400).send("Missing call_control_id");
   }
 
+  if (answeredCalls.has(callControlId)) {
+    console.log(`⚠️ Call ${callControlId} already answered, skipping.`);
+    return res.status(200).send("ok");
+  }
+
   if (eventType === "call.initiated") {
     await answerCall(callControlId);
+    answeredCalls.add(callControlId);
     startStreaming(callControlId);
   } else if (eventType === "call.answered") {
     startStreaming(callControlId);
