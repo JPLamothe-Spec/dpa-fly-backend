@@ -19,28 +19,18 @@ if (!TELNYX_API_KEY) {
   process.exit(1);
 }
 
-// In-memory set to track answered calls
+// In-memory set to track which calls have been answered
 const answeredCalls = new Set();
 
-// Placeholder for starting streaming logic
+// Start streaming placeholder
 function startStreaming(callControlId) {
   console.log(`▶️ Starting stream for call_control_id: ${callControlId}`);
   // TODO: Add your stream_start logic here
 }
 
-// Answer call via Telnyx API (strip 'v3:' prefix if present)
+// Call Control API: answer the call (callControlId is already normalized here)
 async function answerCall(callControlId) {
-  if (!callControlId) {
-    console.warn("⚠️ No callControlId provided to answerCall()");
-    return;
-  }
-
-  if (callControlId.startsWith("v3:")) {
-    callControlId = callControlId.substring(3);
-  }
-
   const url = `https://api.telnyx.com/v2/calls/${callControlId}/actions/answer`;
-
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -50,7 +40,6 @@ async function answerCall(callControlId) {
       },
       body: JSON.stringify({}),
     });
-
     if (!response.ok) {
       const errorText = await response.text();
       console.error("❌ Failed to answer call:", errorText);
@@ -62,19 +51,23 @@ async function answerCall(callControlId) {
   }
 }
 
-// Telnyx webhook with full debug and flexible call_control_id extraction
+// Telnyx webhook
 app.post("/telnyx-stream", async (req, res) => {
   console.log(`\n[${new Date().toISOString()}] Telnyx webhook received:`);
   console.log(JSON.stringify(req.body, null, 2));
 
   const eventType = req.body.data?.event_type || "UNKNOWN";
 
-  // Try to get call_control_id from common places
   let callControlId = req.body.data?.call_control_id || req.body.data?.payload?.call_control_id;
 
   if (!callControlId) {
     console.error("❌ Missing call_control_id in event payload, skipping processing.");
     return res.status(400).send("Missing call_control_id");
+  }
+
+  // Strip 'v3:' prefix immediately here
+  if (callControlId.startsWith("v3:")) {
+    callControlId = callControlId.substring(3);
   }
 
   if (answeredCalls.has(callControlId)) {
@@ -107,7 +100,7 @@ app.post("/twilio/voice", (req, res) => {
   res.send(twiml);
 });
 
-// HTTP and WebSocket server setup for Twilio media streaming
+// HTTP server and WebSocket setup
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 
@@ -145,3 +138,4 @@ app.get("/", (req, res) => {
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
+
