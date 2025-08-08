@@ -1,40 +1,42 @@
 // index.js
+const WebSocket = require("ws");
 const express = require("express");
 const http = require("http");
 const bodyParser = require("body-parser");
-const WebSocket = require("ws");
 require("dotenv").config();
 
-const { startAIStream, sendAudioToAI, closeAIStream } = require("./stream");
+const { spawn } = require("child_process");
+const { v4: uuidv4 } = require("uuid");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 3000;
 
-// ✅ Handle Telnyx initial webhook handshake
+// ✅ Telnyx webhook to start streaming
 app.post("/telnyx-stream", (req, res) => {
   console.log(`[${new Date().toISOString()}] 📞 Incoming Telnyx call`);
 
-  // Respond with Call Control instructions to start streaming
   res.json({
-    "instructions": [
+    instructions: [
       {
-        "name": "streaming_start",
-        "params": {
-          "url": `wss://${req.headers.host}/telnyx-stream`
+        name: "streaming_start",
+        params: {
+          url: `wss://${req.headers.host}/telnyx-stream`
         }
       }
     ]
   });
 });
 
-// ✅ Create HTTP server
 const server = http.createServer(app);
 
 // ✅ WebSocket server
 const wss = new WebSocket.Server({ noServer: true });
 
+// Upgrade for Telnyx media stream
 server.on("upgrade", (req, socket, head) => {
   if (req.url === "/telnyx-stream") {
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -43,36 +45,41 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-wss.on("connection", async (ws) => {
+wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established with Telnyx");
 
-  // Start AI stream
-  startAIStream({
-    onTranscript: (text) => {
-      console.log("📝 Transcript:", text);
-    },
-    onClose: () => {
-      console.log("❌ AI stream closed");
-    },
-    onReady: () => {
-      console.log("🧠 AI stream ready");
-    }
+  // Start FFmpeg transcoder (mulaw@8000 → s16le@16000)
+  const ffmpeg = spawn(require("ffmpeg-static"), [
+    "-f", "mulaw",
+    "-ar", "8000",
+    "-ac", "1",
+    "-i", "pipe:0",
+    "-f", "s16le",
+    "-ar", "16000",
+    "-"
+  ]);
+
+  ffmpeg.stdout.on("data", (chunk) => {
+    // Here’s where you’d send audio to AI
+    console.log(`🎧 Received ${chunk.length} bytes from FFmpeg`);
+  });
+
+  ffmpeg.stderr.on("data", (data) => {
+    // FFmpeg logs
   });
 
   ws.on("message", (message) => {
     try {
       const msg = JSON.parse(message);
 
-      // Handle incoming audio from Telnyx
-      if (msg.event === "media") {
+      if (msg.event === "media" && msg.media && msg.media.payload) {
         const audioBuffer = Buffer.from(msg.media.payload, "base64");
-        sendAudioToAI(audioBuffer);
+        ffmpeg.stdin.write(audioBuffer);
       }
 
-      // Handle stop event
       if (msg.event === "stop") {
         console.log("⏹ Telnyx stream stopped");
-        closeAIStream();
+        ffmpeg.stdin.end();
         ws.close();
       }
     } catch (err) {
@@ -81,13 +88,13 @@ wss.on("connection", async (ws) => {
   });
 
   ws.on("close", () => {
-    console.log("🔌 Telnyx WebSocket closed");
-    closeAIStream();
+    console.log("🔌 WebSocket closed");
+    ffmpeg.kill("SIGINT");
   });
 
   ws.on("error", (err) => {
     console.error("⚠️ WebSocket error:", err);
-    closeAIStream();
+    ffmpeg.kill("SIGINT");
   });
 });
 
