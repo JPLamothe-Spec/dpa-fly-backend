@@ -1,85 +1,99 @@
 // index.js
-require("dotenv").config();
+
 const express = require("express");
-const fetch = require("node-fetch");
-const { createServer } = require("http");
+const bodyParser = require("body-parser");
+const http = require("http");
 const WebSocket = require("ws");
+require("dotenv").config();
 
 const app = express();
-app.use(express.json());
-
 const PORT = process.env.PORT || 3000;
-const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-const PUBLIC_WS_URL = "wss://dpa-fly-backend-ufegxw.fly.dev/media-stream"; // Your public WebSocket endpoint
 
-// Health check endpoint
-app.get("/", (req, res) => {
-  res.status(200).send("DPA backend is live");
-});
+// Use JSON parser for Telnyx webhook
+app.use(bodyParser.json());
 
-// Telnyx webhook handler
-app.post("/telnyx-stream", async (req, res) => {
-  console.log(`[${new Date().toISOString()}] 📞 Incoming Telnyx event`);
-  console.log("🔍 Telnyx POST body:", JSON.stringify(req.body, null, 2));
+// Toggle for starting stream on call.initiated (for testing)
+const startStreamOnInitiated = process.env.START_STREAM_ON_INITIATED === "true";
 
-  const eventType = req.body?.data?.event_type;
-  const payload = req.body?.data?.payload;
+// Placeholder function for your actual stream start logic
+function startStreaming(callControlId) {
+  console.log(`▶️ Starting stream for call_control_id: ${callControlId}`);
+  // TODO: Insert your actual stream_start API call or streaming logic here
+}
 
-  if (eventType === "call.answered" && payload?.call_control_id) {
-    const callControlId = payload.call_control_id;
-    console.log(`🎯 Starting media stream for Call Control ID: ${callControlId}`);
+// Telnyx webhook: log all events and optionally start streaming
+app.post("/telnyx-stream", (req, res) => {
+  const eventType = req.body.data?.event_type || "UNKNOWN";
+  const callControlId = req.body.data?.call_control_id || "UNKNOWN";
 
-    try {
-      const resp = await fetch(`https://api.telnyx.com/v2/call_controls/${callControlId}/actions/stream_start`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TELNYX_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          stream_url: PUBLIC_WS_URL,
-          audio_format: "audio/l16;rate=16000" // 16kHz PCM audio for GPT
-        }),
-      });
+  console.log(`[${new Date().toISOString()}] Telnyx event received: ${eventType}`);
+  console.log("Full payload:", JSON.stringify(req.body, null, 2));
 
-      const data = await resp.json();
-
-      if (!resp.ok) {
-        console.error("❌ Failed to start Telnyx media stream:", data);
-      } else {
-        console.log("✅ Media stream started successfully:", data);
-      }
-    } catch (err) {
-      console.error("❌ Error calling Telnyx API:", err);
-    }
+  if (startStreamOnInitiated && eventType === "call.initiated") {
+    startStreaming(callControlId);
+  } else if (!startStreamOnInitiated && eventType === "call.answered") {
+    startStreaming(callControlId);
   }
 
   res.status(200).send("ok");
 });
 
-// Setup HTTP and WebSocket servers
-const server = createServer(app);
+// Twilio webhook to start media streaming
+app.post("/twilio/voice", (req, res) => {
+  const twiml = `
+    <Response>
+      <Start>
+        <Stream url="wss://${req.headers.host}/media-stream" track="inbound_track" />
+      </Start>
+    </Response>
+  `.trim();
+
+  res.type("text/xml");
+  res.send(twiml);
+});
+
+// Create HTTP server
+const server = http.createServer(app);
+
+// Create WebSocket server with noServer option (manual upgrade)
 const wss = new WebSocket.Server({ noServer: true });
 
-server.on("upgrade", (req, socket, head) => {
-  if (req.url === "/media-stream") {
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      console.log("🔗 Telnyx media WebSocket connected ✅");
-
-      ws.on("message", (msg) => {
-        console.log(`🎵 Received audio frame: ${msg.length} bytes`);
-        // TODO: Forward audio to GPT stream here
-      });
-
-      ws.on("close", () => {
-        console.log("❌ Telnyx media WebSocket closed");
-      });
+// Handle WebSocket upgrades
+server.on("upgrade", (request, socket, head) => {
+  if (request.url === "/media-stream") {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
     });
   } else {
     socket.destroy();
   }
 });
 
+// Handle WebSocket connections
+wss.on("connection", (ws) => {
+  console.log("✅ WebSocket connection established");
+
+  ws.on("message", (message) => {
+    // TODO: Handle incoming audio chunks here
+    // For now just log message length to confirm streaming
+    console.log(`📨 Media Stream Message: ${message.length} bytes`);
+  });
+
+  ws.on("close", () => {
+    console.log("❌ WebSocket connection closed");
+  });
+
+  ws.on("error", (err) => {
+    console.error("⚠️ WebSocket error:", err);
+  });
+});
+
+// Health check route
+app.get("/", (req, res) => {
+  res.status(200).send("DPA backend is live");
+});
+
+// Start server
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
