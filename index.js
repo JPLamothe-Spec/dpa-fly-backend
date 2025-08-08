@@ -2,6 +2,7 @@
 
 const express = require("express");
 const bodyParser = require("body-parser");
+const fetch = require("node-fetch");
 const http = require("http");
 const WebSocket = require("ws");
 require("dotenv").config();
@@ -9,36 +10,65 @@ require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Use JSON parser for Telnyx webhook
 app.use(bodyParser.json());
 
-// Toggle for starting stream on call.initiated (for testing)
-const startStreamOnInitiated = process.env.START_STREAM_ON_INITIATED === "true";
+const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 
-// Placeholder function for your actual stream start logic
-function startStreaming(callControlId) {
-  console.log(`▶️ Starting stream for call_control_id: ${callControlId}`);
-  // TODO: Insert your actual stream_start API call or streaming logic here
+if (!TELNYX_API_KEY) {
+  console.error("⚠️ Missing TELNYX_API_KEY environment variable");
+  process.exit(1);
 }
 
-// Telnyx webhook: log all events and optionally start streaming
-app.post("/telnyx-stream", (req, res) => {
+// Start streaming placeholder
+function startStreaming(callControlId) {
+  console.log(`▶️ Starting stream for call_control_id: ${callControlId}`);
+  // TODO: Add your stream_start logic here
+}
+
+// Call Control API: answer the call
+async function answerCall(callControlId) {
+  const url = `https://api.telnyx.com/v2/calls/${callControlId}/actions/answer`;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TELNYX_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ Failed to answer call:", errorText);
+    } else {
+      console.log(`✅ Call answered: ${callControlId}`);
+    }
+  } catch (err) {
+    console.error("❌ Error answering call:", err);
+  }
+}
+
+// Telnyx webhook
+app.post("/telnyx-stream", async (req, res) => {
   const eventType = req.body.data?.event_type || "UNKNOWN";
   const callControlId = req.body.data?.call_control_id || "UNKNOWN";
 
   console.log(`[${new Date().toISOString()}] Telnyx event received: ${eventType}`);
   console.log("Full payload:", JSON.stringify(req.body, null, 2));
 
-  if (startStreamOnInitiated && eventType === "call.initiated") {
+  if (eventType === "call.initiated") {
+    // Answer the call and start streaming
+    await answerCall(callControlId);
     startStreaming(callControlId);
-  } else if (!startStreamOnInitiated && eventType === "call.answered") {
+  } else if (eventType === "call.answered") {
+    // If you still want to handle this event separately
     startStreaming(callControlId);
   }
 
   res.status(200).send("ok");
 });
 
-// Twilio webhook to start media streaming
+// Twilio webhook for media streaming
 app.post("/twilio/voice", (req, res) => {
   const twiml = `
     <Response>
@@ -52,13 +82,10 @@ app.post("/twilio/voice", (req, res) => {
   res.send(twiml);
 });
 
-// Create HTTP server
+// HTTP server and WebSocket setup
 const server = http.createServer(app);
-
-// Create WebSocket server with noServer option (manual upgrade)
 const wss = new WebSocket.Server({ noServer: true });
 
-// Handle WebSocket upgrades
 server.on("upgrade", (request, socket, head) => {
   if (request.url === "/media-stream") {
     wss.handleUpgrade(request, socket, head, (ws) => {
@@ -69,14 +96,12 @@ server.on("upgrade", (request, socket, head) => {
   }
 });
 
-// Handle WebSocket connections
 wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established");
 
   ws.on("message", (message) => {
-    // TODO: Handle incoming audio chunks here
-    // For now just log message length to confirm streaming
     console.log(`📨 Media Stream Message: ${message.length} bytes`);
+    // TODO: Handle Twilio audio chunks here
   });
 
   ws.on("close", () => {
@@ -88,12 +113,10 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Health check route
 app.get("/", (req, res) => {
   res.status(200).send("DPA backend is live");
 });
 
-// Start server
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
