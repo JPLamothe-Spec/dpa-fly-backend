@@ -1,19 +1,24 @@
-// index.js (Telnyx WebSocket Version)
+// index.js
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 require("dotenv").config();
 
-const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
-const { synthesizeAndSend } = require("./openaiTTS");
+const {
+  startAIStream,
+  sendAudioToAI,
+  commitAudioToAI,
+  closeAIStream
+} = require("./openaiStream");
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
+
 const PORT = process.env.PORT || 3000;
 
-// Root health check
-app.get("/", (req, res) => res.status(200).send("DPA backend (Telnyx) is live"));
+// Health check
+app.get("/", (req, res) => res.status(200).send("✅ DPA backend is live"));
 
 // Handle Telnyx WebSocket upgrade
 server.on("upgrade", (req, socket, head) => {
@@ -26,96 +31,78 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
+// WebSocket connection (Telnyx → backend)
 wss.on("connection", (ws) => {
-  console.log(`[${new Date().toISOString()}] ✅ Telnyx WebSocket connected`);
+  console.log(`[${new Date().toISOString()}] 📡 Telnyx WebSocket connected`);
 
-  let transcriptBuffer = "";
-  let lastFlushTime = Date.now();
-  let streamId = null;
+  let isStreamAlive = true;
+  let lastAudioTime = Date.now();
+  let silenceTimeout = null;
 
-  // Handle GPT transcript output
-  const handleTranscript = async (text) => {
-    console.log(`[${new Date().toISOString()}] 📝 Transcript:`, text);
-    transcriptBuffer += text;
-    const now = Date.now();
-
-    const isFinalPunctuation = /[.!?]\s*$/.test(transcriptBuffer);
-    const isFlushDue = now - lastFlushTime > 1000 && transcriptBuffer.trim().length > 5;
-
-    if (isFinalPunctuation || isFlushDue) {
-      const finalSentence = transcriptBuffer.trim();
-      transcriptBuffer = "";
-      lastFlushTime = now;
-
-      if (ws.readyState === WebSocket.OPEN) {
-        if (!streamId) {
-          console.warn(`[${new Date().toISOString()}] ⚠️ synthesizeAndSend skipped — streamId not yet captured`);
-        } else {
-          console.log(`[${new Date().toISOString()}] 📣 Sending TTS:`, finalSentence);
-          await synthesizeAndSend(finalSentence, ws, streamId);
-        }
-      } else {
-        console.warn(`[${new Date().toISOString()}] ⚠️ TTS skipped – WebSocket already closed`);
-      }
-    }
-  };
-
-  // Start GPT stream
+  // Start GPT Realtime stream
   startAIStream({
-    onTranscript: handleTranscript,
-    onClose: () => ws.close(),
-    onReady: () => console.log(`[${new Date().toISOString()}] 🧠 GPT stream ready`)
+    onTranscript: (text) => {
+      console.log(`[${new Date().toISOString()}] 📝 Transcript:`, text);
+    },
+    onClose: () => {
+      console.log(`[${new Date().toISOString()}] ❌ GPT stream closed`);
+      ws.close();
+    },
+    onReady: () => {
+      console.log(`[${new Date().toISOString()}] 🧠 GPT-4o Realtime ready`);
+    }
   });
 
-  // Handle Telnyx audio + events
-  ws.on("message", (msg) => {
-    let data;
+  // Handle Telnyx messages
+  ws.on("message", (rawMsg) => {
     try {
-      data = JSON.parse(msg);
-    } catch {
-      console.error(`[${new Date().toISOString()}] ⚠️ Non-JSON message from Telnyx`);
-      return;
-    }
+      const msg = JSON.parse(rawMsg);
 
-    if (data.event === "connected") {
-      console.log(`[${new Date().toISOString()}] 🔗 Telnyx call connected`);
-    } 
-    else if (data.event === "start") {
-      streamId = data.stream_id || data.call_id || null;
-      console.log(`[${new Date().toISOString()}] 🔗 Captured Telnyx streamId:`, streamId);
-    } 
-    else if (data.event === "media" && data.media?.payload) {
-      const audioBuffer = Buffer.from(data.media.payload, "base64");
-      sendAudioToAI(audioBuffer); // Already 16kHz PCM — no transcoder
-    } 
-    else if (data.event === "stop") {
-      console.log(`[${new Date().toISOString()}] ⛔ Telnyx stream stopped`);
-      closeAIStream();
+      // PCM audio frame from Telnyx
+      if (msg.event === "media") {
+        const audio = Buffer.from(msg.media.payload, "base64");
+        sendAudioToAI(audio); // send straight to GPT
+        lastAudioTime = Date.now();
+
+        // Reset silence timer
+        if (silenceTimeout) clearTimeout(silenceTimeout);
+        silenceTimeout = setTimeout(() => {
+          console.log(`[${new Date().toISOString()}] ⏸ Silence detected — committing audio`);
+          commitAudioToAI();
+        }, 1000); // 1s silence triggers commit
+      }
+
+      // Call started
+      else if (msg.event === "start") {
+        console.log(`[${new Date().toISOString()}] ▶️ Call started — Stream ID: ${msg.stream_id}`);
+      }
+
+      // Call stopped
+      else if (msg.event === "stop") {
+        console.log(`[${new Date().toISOString()}] ⛔ Call stopped`);
+        isStreamAlive = false;
+        commitAudioToAI();
+        closeAIStream();
+      }
+
+    } catch (err) {
+      console.error(`[${new Date().toISOString()}] ⚠️ Error parsing Telnyx WS message:`, err);
     }
   });
 
+  // WebSocket closed
   ws.on("close", () => {
     console.log(`[${new Date().toISOString()}] ❌ Telnyx WebSocket closed`);
     closeAIStream();
   });
 
+  // WebSocket error
   ws.on("error", (err) => {
     console.error(`[${new Date().toISOString()}] ⚠️ Telnyx WebSocket error:`, err);
     closeAIStream();
   });
 });
 
-// Start server
-server.listen(PORT)
-  .on("listening", () => {
-    console.log(`[${new Date().toISOString()}] 🚀 Telnyx DPA backend listening on port ${PORT}`);
-  })
-  .on("error", (err) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(`[${new Date().toISOString()}] ❌ Port already in use. Exiting...`);
-      process.exit(1);
-    } else {
-      throw err;
-    }
-  });
-
+server.listen(PORT, () => {
+  console.log(`[${new Date().toISOString()}] 🚀 Server listening on port ${PORT}`);
+});
