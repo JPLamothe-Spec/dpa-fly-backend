@@ -55,10 +55,15 @@ async function answerCall(callControlId) {
 // Telnyx webhook
 app.post("/telnyx-stream", async (req, res) => {
   const eventType = req.body.data?.event_type || "UNKNOWN";
-  let callControlId = req.body.data?.call_control_id || "UNKNOWN";
+  let callControlId = req.body.data?.call_control_id;
 
   console.log(`[${new Date().toISOString()}] Telnyx event received: ${eventType}`);
   console.log("Full payload:", JSON.stringify(req.body, null, 2));
+
+  if (!callControlId) {
+    console.error("❌ Missing call_control_id in event payload, skipping processing.");
+    return res.status(400).send("Missing call_control_id");
+  }
 
   if (eventType === "call.initiated") {
     await answerCall(callControlId);
