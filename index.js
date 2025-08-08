@@ -25,8 +25,12 @@ function startStreaming(callControlId) {
   // TODO: Add your stream_start logic here
 }
 
-// Call Control API: answer the call
+// Call Control API: answer the call (with v3: prefix stripped)
 async function answerCall(callControlId) {
+  if (callControlId.startsWith("v3:")) {
+    callControlId = callControlId.substring(3);
+  }
+
   const url = `https://api.telnyx.com/v2/calls/${callControlId}/actions/answer`;
   try {
     const response = await fetch(url, {
@@ -51,17 +55,15 @@ async function answerCall(callControlId) {
 // Telnyx webhook
 app.post("/telnyx-stream", async (req, res) => {
   const eventType = req.body.data?.event_type || "UNKNOWN";
-  const callControlId = req.body.data?.call_control_id || "UNKNOWN";
+  let callControlId = req.body.data?.call_control_id || "UNKNOWN";
 
   console.log(`[${new Date().toISOString()}] Telnyx event received: ${eventType}`);
   console.log("Full payload:", JSON.stringify(req.body, null, 2));
 
   if (eventType === "call.initiated") {
-    // Answer the call and start streaming
     await answerCall(callControlId);
     startStreaming(callControlId);
   } else if (eventType === "call.answered") {
-    // If you still want to handle this event separately
     startStreaming(callControlId);
   }
 
