@@ -21,15 +21,18 @@ const PORT = process.env.PORT || 3000;
 app.post("/telnyx-stream", (req, res) => {
   console.log(`[${new Date().toISOString()}] 📞 Incoming Telnyx call`);
 
+  // Use the exact host Telnyx used for this POST request
+  const host = req.headers.host;
+
   res.json({
     instructions: [
       {
         name: "streaming_start",
         params: {
-          url: "wss://dpa-fly-backend-ufegxw.fly.dev/telnyx-stream",
+          url: `wss://${host}/telnyx-stream`, // dynamically match POST host
           audio: {
-            format: "pcm_s16le",
-            sample_rate: 16000
+            format: "pcm_s16le", // 16-bit PCM
+            sample_rate: 16000   // 16 kHz
           }
         }
       }
@@ -109,3 +112,4 @@ app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
 server.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
+
