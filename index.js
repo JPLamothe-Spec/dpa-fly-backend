@@ -1,49 +1,39 @@
-// index.js
+// index.js (Telnyx WebSocket Version)
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
-const { startTranscoder, pipeToTranscoder } = require("./transcoder");
+require("dotenv").config();
+
 const { startAIStream, sendAudioToAI, closeAIStream } = require("./openaiStream");
 const { synthesizeAndSend } = require("./openaiTTS");
-require("dotenv").config();
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 const PORT = process.env.PORT || 3000;
 
-app.post("/twilio/voice", (req, res) => {
-  const streamUrl = `wss://${req.headers.host}/media-stream`;
-  const twiml = `
-    <Response>
-      <Say voice="alice">...</Say>
-      <Start>
-        <Stream url="${streamUrl}" track="inbound_track"/>
-      </Start>
-      <Pause length="60"/>
-    </Response>
-  `;
-  res.type("text/xml").send(twiml.trim());
-});
+// Root health check
+app.get("/", (req, res) => res.status(200).send("DPA backend (Telnyx) is live"));
 
+// Handle Telnyx WebSocket upgrade
 server.on("upgrade", (req, socket, head) => {
-  if (req.url === "/media-stream") {
+  if (req.url === "/telnyx-stream") {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });
+  } else {
+    socket.destroy();
   }
 });
 
 wss.on("connection", (ws) => {
-  console.log(`[${new Date().toISOString()}] ✅ WebSocket connection established`);
+  console.log(`[${new Date().toISOString()}] ✅ Telnyx WebSocket connected`);
 
-  let isStreamAlive = true;
-  let transcoderReady = false;
-  let streamSid = null;
   let transcriptBuffer = "";
   let lastFlushTime = Date.now();
+  let streamId = null;
 
-  // 🔊 Handle GPT response
+  // Handle GPT transcript output
   const handleTranscript = async (text) => {
     console.log(`[${new Date().toISOString()}] 📝 Transcript:`, text);
     transcriptBuffer += text;
@@ -57,12 +47,12 @@ wss.on("connection", (ws) => {
       transcriptBuffer = "";
       lastFlushTime = now;
 
-      if (ws.readyState === 1) {
-        if (!streamSid) {
-          console.warn(`[${new Date().toISOString()}] ⚠️ synthesizeAndSend skipped — streamSid not yet captured`);
+      if (ws.readyState === WebSocket.OPEN) {
+        if (!streamId) {
+          console.warn(`[${new Date().toISOString()}] ⚠️ synthesizeAndSend skipped — streamId not yet captured`);
         } else {
-          console.log(`[${new Date().toISOString()}] 📣 Calling synthesizeAndSend:`, finalSentence);
-          await synthesizeAndSend(finalSentence, ws, streamSid);
+          console.log(`[${new Date().toISOString()}] 📣 Sending TTS:`, finalSentence);
+          await synthesizeAndSend(finalSentence, ws, streamId);
         }
       } else {
         console.warn(`[${new Date().toISOString()}] ⚠️ TTS skipped – WebSocket already closed`);
@@ -70,61 +60,56 @@ wss.on("connection", (ws) => {
     }
   };
 
-  // ✅ Start GPT stream
+  // Start GPT stream
   startAIStream({
     onTranscript: handleTranscript,
     onClose: () => ws.close(),
-    onReady: () => console.log(`[${new Date().toISOString()}] 🧠 GPT-4o stream ready`)
+    onReady: () => console.log(`[${new Date().toISOString()}] 🧠 GPT stream ready`)
   });
 
-  // ✅ Start transcoder immediately
-  startTranscoder((chunk) => {
-    if (!transcoderReady) {
-      transcoderReady = true;
-      console.log(`[${new Date().toISOString()}] 🎙️ Transcoder is now ready`);
-    }
-    if (isStreamAlive) {
-      console.log(`[${new Date().toISOString()}] 🎧 Sending audio to GPT`);
-      sendAudioToAI(chunk);
-    }
-  });
-
-  // 📡 Handle Twilio media stream
+  // Handle Telnyx audio + events
   ws.on("message", (msg) => {
-    const data = JSON.parse(msg);
+    let data;
+    try {
+      data = JSON.parse(msg);
+    } catch {
+      console.error(`[${new Date().toISOString()}] ⚠️ Non-JSON message from Telnyx`);
+      return;
+    }
 
-    if (data.event === "start") {
-      streamSid = data.start.streamSid;
-      console.log(`[${new Date().toISOString()}] 🔗 Captured streamSid:`, streamSid);
-    } else if (data.event === "media") {
-      if (transcoderReady) {
-        const audio = Buffer.from(data.media.payload, "base64");
-        pipeToTranscoder(audio);
-      } else {
-        console.log(`[${new Date().toISOString()}] ⚠️ Audio skipped — transcoder not ready yet`);
-      }
-    } else if (data.event === "stop") {
-      console.log(`[${new Date().toISOString()}] ⛔ Twilio stream stopped`);
-      isStreamAlive = false;
+    if (data.event === "connected") {
+      console.log(`[${new Date().toISOString()}] 🔗 Telnyx call connected`);
+    } 
+    else if (data.event === "start") {
+      streamId = data.stream_id || data.call_id || null;
+      console.log(`[${new Date().toISOString()}] 🔗 Captured Telnyx streamId:`, streamId);
+    } 
+    else if (data.event === "media" && data.media?.payload) {
+      const audioBuffer = Buffer.from(data.media.payload, "base64");
+      sendAudioToAI(audioBuffer); // Already 16kHz PCM — no transcoder
+    } 
+    else if (data.event === "stop") {
+      console.log(`[${new Date().toISOString()}] ⛔ Telnyx stream stopped`);
       closeAIStream();
     }
   });
 
   ws.on("close", () => {
-    console.log(`[${new Date().toISOString()}] ❌ WebSocket connection closed`);
+    console.log(`[${new Date().toISOString()}] ❌ Telnyx WebSocket closed`);
     closeAIStream();
   });
 
   ws.on("error", (err) => {
-    console.error(`[${new Date().toISOString()}] ⚠️ WebSocket error:`, err);
+    console.error(`[${new Date().toISOString()}] ⚠️ Telnyx WebSocket error:`, err);
     closeAIStream();
   });
 });
 
-app.get("/", (req, res) => res.status(200).send("DPA backend is live"));
-
+// Start server
 server.listen(PORT)
-  .on("listening", () => console.log(`[${new Date().toISOString()}] 🚀 Server listening on port ${PORT}`))
+  .on("listening", () => {
+    console.log(`[${new Date().toISOString()}] 🚀 Telnyx DPA backend listening on port ${PORT}`);
+  })
   .on("error", (err) => {
     if (err.code === "EADDRINUSE") {
       console.error(`[${new Date().toISOString()}] ❌ Port already in use. Exiting...`);
@@ -133,3 +118,4 @@ server.listen(PORT)
       throw err;
     }
   });
+
