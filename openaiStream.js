@@ -1,97 +1,97 @@
-const https = require("https");
+// openaiStream.js
+const WebSocket = require("ws");
 const { v4: uuidv4 } = require("uuid");
 require("dotenv").config();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-let openaiRequest;
-let partialBuffer = "";
+
+// WebSocket connection to GPT
+let gptWs = null;
 
 function startAIStream({ onTranscript, onClose, onReady }) {
   const sessionId = uuidv4();
+  const url = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12&voice=alloy`;
 
-  const requestPayload = {
-    model: "gpt-4o",
-    messages: [
-      {
-        role: "system",
-        content: "You are Anna, JP's friendly Australian digital assistant. Speak naturally and keep responses short and conversational."
-      }
-    ],
-    stream: true,
-    max_tokens: 256,
-    temperature: 0.7
-  };
+  console.log(`[${new Date().toISOString()}] 🔌 Connecting to OpenAI Realtime API...`);
 
-  const req = https.request(
-    {
-      hostname: "api.openai.com",
-      path: "/v1/chat/completions",
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      }
-    },
-    (res) => {
-      res.on("data", (chunk) => {
-        partialBuffer += chunk.toString();
-        const parts = partialBuffer.split("\n\n");
-        partialBuffer = parts.pop();
-
-        for (const part of parts) {
-          if (!part || !part.startsWith("data:")) continue;
-
-          const jsonPart = part.replace(/^data:\s*/, "");
-          if (jsonPart === "[DONE]") {
-            console.log("✅ OpenAI stream complete");
-            closeAIStream();
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(jsonPart);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content && onTranscript) {
-              onTranscript(content);
-            }
-          } catch (err) {
-            console.error("⚠️ Error parsing OpenAI stream chunk:", err);
-          }
-        }
-      });
-
-      res.on("end", () => {
-        console.log("❌ OpenAI stream ended");
-        if (onClose) onClose();
-      });
+  gptWs = new WebSocket(url, {
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "OpenAI-Beta": "realtime=v1"
     }
-  );
+  });
 
-  req.on("error", (err) => {
-    console.error("❌ OpenAI stream error:", err);
+  gptWs.on("open", () => {
+    console.log(`[${new Date().toISOString()}] ✅ GPT Realtime connection established (session: ${sessionId})`);
+    if (onReady) onReady();
+  });
+
+  gptWs.on("message", (message) => {
+    try {
+      const msg = JSON.parse(message.toString());
+
+      if (msg.type === "transcript.delta" && msg.delta) {
+        // Live transcript partial
+        if (onTranscript) onTranscript(msg.delta);
+      }
+
+      if (msg.type === "transcript.completed") {
+        console.log(`[${new Date().toISOString()}] 📝 Final transcript:`, msg.transcript);
+      }
+
+      if (msg.type === "response.completed") {
+        console.log(`[${new Date().toISOString()}] ✅ GPT finished speaking`);
+      }
+    } catch (err) {
+      console.error("⚠️ Error parsing GPT message:", err);
+    }
+  });
+
+  gptWs.on("close", () => {
+    console.log(`[${new Date().toISOString()}] ❌ GPT WebSocket closed`);
     if (onClose) onClose();
   });
 
-  req.write(JSON.stringify(requestPayload));
-  req.flushHeaders?.();
-  openaiRequest = req;
-
-  if (onReady) onReady();
+  gptWs.on("error", (err) => {
+    console.error(`[${new Date().toISOString()}] ❌ GPT WebSocket error:`, err);
+    if (onClose) onClose();
+  });
 }
 
+// Send Telnyx PCM audio directly to GPT
 function sendAudioToAI(audioBuffer) {
-  // Not used with GPT-4o chat completions
+  if (!gptWs || gptWs.readyState !== WebSocket.OPEN) {
+    console.warn("⚠️ Cannot send audio — GPT WebSocket not open");
+    return;
+  }
+
+  // Send raw PCM audio frame
+  gptWs.send(JSON.stringify({
+    type: "input_audio_buffer.append",
+    audio: audioBuffer.toString("base64")
+  }));
 }
 
+// Tell GPT to start processing current audio buffer
+function commitAudioToAI() {
+  if (gptWs && gptWs.readyState === WebSocket.OPEN) {
+    gptWs.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+    gptWs.send(JSON.stringify({ type: "response.create" }));
+  }
+}
+
+// Close GPT connection
 function closeAIStream() {
-  if (openaiRequest) {
-    openaiRequest.end();
-    openaiRequest = null;
+  if (gptWs) {
+    gptWs.close();
+    gptWs = null;
   }
 }
 
 module.exports = {
   startAIStream,
   sendAudioToAI,
+  commitAudioToAI,
   closeAIStream
 };
+
