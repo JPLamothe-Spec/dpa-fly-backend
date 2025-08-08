@@ -5,17 +5,12 @@ const http = require("http");
 const bodyParser = require("body-parser");
 require("dotenv").config();
 
-const { spawn } = require("child_process");
-const { v4: uuidv4 } = require("uuid");
-const fs = require("fs");
-const path = require("path");
-
 const app = express();
 app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 3000;
 
-// ✅ Telnyx webhook to start streaming
+// ✅ Telnyx webhook to start streaming with PCM @ 16kHz
 app.post("/telnyx-stream", (req, res) => {
   console.log(`[${new Date().toISOString()}] 📞 Incoming Telnyx call`);
 
@@ -24,7 +19,12 @@ app.post("/telnyx-stream", (req, res) => {
       {
         name: "streaming_start",
         params: {
-          url: `wss://${req.headers.host}/telnyx-stream`
+          // Your exact domain
+          url: "wss://dpa-fly-backend-ufegxw.fly.dev/telnyx-stream",
+          audio: {
+            format: "pcm_s16le",   // 16-bit PCM
+            sample_rate: 16000    // 16 kHz
+          }
         }
       }
     ]
@@ -33,10 +33,9 @@ app.post("/telnyx-stream", (req, res) => {
 
 const server = http.createServer(app);
 
-// ✅ WebSocket server
+// ✅ WebSocket server for Telnyx media
 const wss = new WebSocket.Server({ noServer: true });
 
-// Upgrade for Telnyx media stream
 server.on("upgrade", (req, socket, head) => {
   if (req.url === "/telnyx-stream") {
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -48,38 +47,19 @@ server.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established with Telnyx");
 
-  // Start FFmpeg transcoder (mulaw@8000 → s16le@16000)
-  const ffmpeg = spawn(require("ffmpeg-static"), [
-    "-f", "mulaw",
-    "-ar", "8000",
-    "-ac", "1",
-    "-i", "pipe:0",
-    "-f", "s16le",
-    "-ar", "16000",
-    "-"
-  ]);
-
-  ffmpeg.stdout.on("data", (chunk) => {
-    // Here’s where you’d send audio to AI
-    console.log(`🎧 Received ${chunk.length} bytes from FFmpeg`);
-  });
-
-  ffmpeg.stderr.on("data", (data) => {
-    // FFmpeg logs
-  });
-
   ws.on("message", (message) => {
     try {
       const msg = JSON.parse(message);
 
       if (msg.event === "media" && msg.media && msg.media.payload) {
+        // Direct PCM data, already AI-ready
         const audioBuffer = Buffer.from(msg.media.payload, "base64");
-        ffmpeg.stdin.write(audioBuffer);
+        console.log(`🎧 Received ${audioBuffer.length} bytes of PCM audio`);
+        // TODO: send audioBuffer to GPT-4o real-time stream here
       }
 
       if (msg.event === "stop") {
         console.log("⏹ Telnyx stream stopped");
-        ffmpeg.stdin.end();
         ws.close();
       }
     } catch (err) {
@@ -88,13 +68,11 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
-    console.log("🔌 WebSocket closed");
-    ffmpeg.kill("SIGINT");
+    console.log("🔌 Telnyx WebSocket closed");
   });
 
   ws.on("error", (err) => {
     console.error("⚠️ WebSocket error:", err);
-    ffmpeg.kill("SIGINT");
   });
 });
 
