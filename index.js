@@ -30,7 +30,24 @@ function startStreaming(callControlId) {
 
 // Call Control API: answer the call (callControlId is already normalized here)
 async function answerCall(callControlId) {
+  // Defensive check & strip v3: prefix here if missed earlier
+  if (callControlId.startsWith("v3:")) {
+    callControlId = callControlId.substring(3);
+    console.log("🔧 Stripped 'v3:' prefix, normalized callControlId:", callControlId);
+  } else {
+    console.log("ℹ️ callControlId does not have 'v3:' prefix:", callControlId);
+  }
+
+  // Validate callControlId format (basic UUID-like check)
+  const validFormat = /^[a-zA-Z0-9-_]+$/.test(callControlId);
+  if (!validFormat) {
+    console.error("❌ callControlId format invalid:", callControlId);
+    return;
+  }
+
   const url = `https://api.telnyx.com/v2/calls/${callControlId}/actions/answer`;
+  console.log(`📞 Sending answer call request to Telnyx API for ID: ${callControlId}`);
+
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -40,11 +57,12 @@ async function answerCall(callControlId) {
       },
       body: JSON.stringify({}),
     });
+
     if (!response.ok) {
       const errorText = await response.text();
       console.error("❌ Failed to answer call:", errorText);
     } else {
-      console.log(`✅ Call answered: ${callControlId}`);
+      console.log(`✅ Call answered successfully: ${callControlId}`);
     }
   } catch (err) {
     console.error("❌ Error answering call:", err);
@@ -58,6 +76,7 @@ app.post("/telnyx-stream", async (req, res) => {
 
   const eventType = req.body.data?.event_type || "UNKNOWN";
 
+  // Try to get callControlId from different possible places
   let callControlId = req.body.data?.call_control_id || req.body.data?.payload?.call_control_id;
 
   if (!callControlId) {
@@ -65,9 +84,10 @@ app.post("/telnyx-stream", async (req, res) => {
     return res.status(400).send("Missing call_control_id");
   }
 
-  // Strip 'v3:' prefix immediately here
+  // Strip 'v3:' prefix immediately here if present
   if (callControlId.startsWith("v3:")) {
     callControlId = callControlId.substring(3);
+    console.log("🔧 Stripped 'v3:' prefix from callControlId in webhook:", callControlId);
   }
 
   if (answeredCalls.has(callControlId)) {
@@ -81,6 +101,8 @@ app.post("/telnyx-stream", async (req, res) => {
     startStreaming(callControlId);
   } else if (eventType === "call.answered") {
     startStreaming(callControlId);
+  } else {
+    console.log(`ℹ️ Received unhandled event_type: ${eventType}`);
   }
 
   res.status(200).send("ok");
