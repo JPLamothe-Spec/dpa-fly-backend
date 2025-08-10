@@ -1,3 +1,4 @@
+// index.js
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
@@ -40,10 +41,8 @@ wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established");
 
   ws.on("message", (message) => {
-    // Raw 16kHz PCM audio chunks arrive here
     console.log(`📨 Received audio chunk: ${message.length} bytes`);
-
-    // TODO: Insert your AI transcription or processing logic here
+    // TODO: Add your AI transcription or processing here
   });
 
   ws.on("close", () => {
