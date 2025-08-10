@@ -1,4 +1,3 @@
-// index.js
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
@@ -6,6 +5,11 @@ require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Simple GET endpoint for testing webhook URL
+app.get("/twilio/voice", (req, res) => {
+  res.status(200).send("Twilio voice webhook endpoint is live.");
+});
 
 // Twilio webhook to answer calls and start Media Stream with 16kHz PCM
 app.post("/twilio/voice", (req, res) => {
@@ -41,8 +45,10 @@ wss.on("connection", (ws) => {
   console.log("✅ WebSocket connection established");
 
   ws.on("message", (message) => {
+    // Raw 16kHz PCM audio chunks arrive here
     console.log(`📨 Received audio chunk: ${message.length} bytes`);
-    // TODO: Add your AI transcription or processing here
+
+    // TODO: Insert your AI transcription or processing logic here
   });
 
   ws.on("close", () => {
